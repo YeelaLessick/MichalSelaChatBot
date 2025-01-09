@@ -1,4 +1,4 @@
 flask
 botbuilder-core
 botbuilder-schema
-botbuilder-integration-flask
+aiohttp
