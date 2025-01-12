@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 from botbuilder.core import BotFrameworkAdapter, BotFrameworkAdapterSettings, TurnContext
 from botbuilder.schema import Activity
+import asyncio
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -24,13 +25,15 @@ def messages():
 
     activity = Activity().deserialize(body)
     auth_header = request.headers.get("Authorization", "")
+    print(auth_header)
+    #auth_header = None
 
     async def call_echo_logic(turn_context):
         await echo_logic(turn_context)
 
     try:
         task = adapter.process_activity(activity, auth_header, call_echo_logic)
-        task.result()  # Wait for task to complete
+        asyncio.run(task)  # Await the async task
         return jsonify({"status": "OK"}), 200
     except Exception as e:
         print(f"Error: {e}")
