@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 from botbuilder.core import BotFrameworkAdapter, BotFrameworkAdapterSettings, TurnContext
 from botbuilder.schema import Activity
+from azure.identity import ManagedIdentityCredential
 import asyncio
 
 # Initialize Flask app
@@ -10,10 +11,22 @@ app = Flask(__name__)
 settings = BotFrameworkAdapterSettings(app_id="74eb9820-0f07-4a5d-9078-7e29eb3e8f59", app_password=None )
 adapter = BotFrameworkAdapter(settings)
 
+# Debugging Managed Identity token
+try:
+    credential = ManagedIdentityCredential()
+    token = credential.get_token("https://graph.microsoft.com/.default")
+    print("Managed Identity Token:", token.token)
+except Exception as e:
+    print(f"Failed to fetch Managed Identity Token: {e}")
+
 # Echo Bot logic
 async def echo_logic(turn_context: TurnContext):
     user_message = turn_context.activity.text
     await turn_context.send_activity(f"You said: {user_message}")
+
+@app.route('/')
+def index():
+    return "Welcome to Michal Sela Bot!"
 
 # Route to handle incoming messages
 @app.route("/api/messages", methods=["POST"])

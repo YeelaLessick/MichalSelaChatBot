@@ -2,3 +2,4 @@ flask
 botbuilder-core
 botbuilder-schema
 aiohttp
+azure.identity
