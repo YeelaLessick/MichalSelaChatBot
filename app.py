@@ -3,6 +3,7 @@ from botbuilder.core import BotFrameworkAdapter, BotFrameworkAdapterSettings, Tu
 from botbuilder.schema import Activity
 from azure.identity import ManagedIdentityCredential
 import asyncio
+import os
 
 # Initialize Flask app
 app = Flask(__name__)
