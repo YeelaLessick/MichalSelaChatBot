@@ -8,7 +8,10 @@ import asyncio
 app = Flask(__name__)
 
 # Bot Framework Adapter
-settings = BotFrameworkAdapterSettings(app_id="b7548fae-2a32-4390-a564-156fba07f887",app_password="-MJ8Q~mntwp0FCUncWjMWJ16qBolrfHxgKZ3qbHi" )
+client_secret = os.getenv("BOT_CLIENT_SECRET")
+if not client_secret:
+    raise ValueError("BOT_CLIENT_SECRET is not set in the environment")
+settings = BotFrameworkAdapterSettings(app_id="b7548fae-2a32-4390-a564-156fba07f887",app_password=client_secret)
 adapter = BotFrameworkAdapter(settings)
 
 # Debugging Managed Identity token
