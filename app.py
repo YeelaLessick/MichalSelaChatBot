@@ -8,7 +8,7 @@ import asyncio
 app = Flask(__name__)
 
 # Bot Framework Adapter
-settings = BotFrameworkAdapterSettings(app_id="74eb9820-0f07-4a5d-9078-7e29eb3e8f59", app_password=None )
+settings = BotFrameworkAdapterSettings(app_id="b7548fae-2a32-4390-a564-156fba07f887",app_password="-MJ8Q~mntwp0FCUncWjMWJ16qBolrfHxgKZ3qbHi" )
 adapter = BotFrameworkAdapter(settings)
 
 # Debugging Managed Identity token
