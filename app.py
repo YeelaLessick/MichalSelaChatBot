@@ -3,10 +3,12 @@ from botbuilder.core import BotFrameworkAdapter, BotFrameworkAdapterSettings, Tu
 from botbuilder.schema import Activity
 from azure.identity import ManagedIdentityCredential
 import asyncio
+from michal_sela_chatbot import initialize_chatbot, chat
 import os
 
 # Initialize Flask app
 app = Flask(__name__)
+chain_with_history = initialize_chatbot()
 
 # Bot Framework Adapter
 #client_secret = os.getenv("BOT_CLIENT_SECRET")
@@ -17,9 +19,11 @@ settings = BotFrameworkAdapterSettings(app_id="b7548fae-2a32-4390-a564-156fba07f
 adapter = BotFrameworkAdapter(settings)
 
 # Echo Bot logic
-async def echo_logic(turn_context: TurnContext):
+async def bot_logic(turn_context: TurnContext):
     user_message = turn_context.activity.text
-    await turn_context.send_activity(f"You said: {user_message}")
+    chatbot_response = chat(chain_with_history, user_message)
+    print("chatbot_response: ", chatbot_response)
+    await turn_context.send_activity(chatbot_response)
 
 @app.route('/')
 def index():
@@ -40,7 +44,7 @@ def messages():
     #auth_header = None
 
     async def call_echo_logic(turn_context):
-        await echo_logic(turn_context)
+        await bot_logic(turn_context)
     print("Received message2")
     try:
         task = adapter.process_activity(activity, auth_header, call_echo_logic)
