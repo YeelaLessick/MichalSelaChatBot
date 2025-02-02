@@ -17,4 +17,4 @@ click==8.1.7
 pyplz~=0.11.1
 pandas
 azure.storage.blob
-bidi.algorithm
+python.bidi
