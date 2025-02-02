@@ -9,19 +9,12 @@ import os
 app = Flask(__name__)
 
 # Bot Framework Adapter
-client_secret = os.getenv("BOT_CLIENT_SECRET")
+#client_secret = os.getenv("BOT_CLIENT_SECRET")
+client_secret = "-MJ8Q~mntwp0FCUncWjMWJ16qBolrfHxgKZ3qbHi"
 if not client_secret:
     raise ValueError("BOT_CLIENT_SECRET is not set in the environment")
 settings = BotFrameworkAdapterSettings(app_id="b7548fae-2a32-4390-a564-156fba07f887",app_password=client_secret)
 adapter = BotFrameworkAdapter(settings)
-
-# Debugging Managed Identity token
-try:
-    credential = ManagedIdentityCredential()
-    token = credential.get_token("https://graph.microsoft.com/.default")
-    print("Managed Identity Token:", token.token)
-except Exception as e:
-    print(f"Failed to fetch Managed Identity Token: {e}")
 
 # Echo Bot logic
 async def echo_logic(turn_context: TurnContext):
@@ -35,6 +28,7 @@ def index():
 # Route to handle incoming messages
 @app.route("/api/messages", methods=["POST"])
 def messages():
+    print("Received message1")
     if "application/json" in request.headers["Content-Type"]:
         body = request.json
     else:
@@ -47,10 +41,12 @@ def messages():
 
     async def call_echo_logic(turn_context):
         await echo_logic(turn_context)
-
+    print("Received message2")
     try:
         task = adapter.process_activity(activity, auth_header, call_echo_logic)
+        print("Received message3")
         asyncio.run(task)  # Await the async task
+        print("Received message4")
         return jsonify({"status": "OK"}), 200
     except Exception as e:
         print(f"Error: {e}")
