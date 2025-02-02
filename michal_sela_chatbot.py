@@ -151,7 +151,6 @@
 import json
 import os
 from typing import List
-
 import pandas as pd
 from azure.storage.blob import BlobServiceClient
 from bidi.algorithm import get_display
@@ -194,7 +193,7 @@ def get_data_from_blob():
 
 
 def excel_to_json(sheet):
-    df = pd.read_excel("./modules/michalseladata.xlsx", sheet_name=sheet)
+    df = pd.read_excel("./michalseladata.xlsx", sheet_name=sheet)
     return df.to_json(orient="records", indent=4, force_ascii=False)
 
 
