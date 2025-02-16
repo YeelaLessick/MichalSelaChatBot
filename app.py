@@ -4,7 +4,7 @@ from botbuilder.schema import Activity
 from azure.identity import ManagedIdentityCredential
 import asyncio
 from michal_sela_chatbot import setup_chatbot, chat
-import os
+import threading
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -35,7 +35,7 @@ def index():
 # Route to handle incoming messages
 @app.route("/api/messages", methods=["POST"])
 def messages():
-    print("Received message1")
+    print("Received message")
     if "application/json" in request.headers["Content-Type"]:
         body = request.json
     else:
@@ -43,21 +43,16 @@ def messages():
 
     activity = Activity().deserialize(body)
     auth_header = request.headers.get("Authorization", "")
-    print(auth_header)
-    #auth_header = None
 
     async def call_echo_logic(turn_context):
         await bot_logic(turn_context)
-    print("Received message2")
-    try:
-        task = adapter.process_activity(activity, auth_header, call_echo_logic)
-        print("Received message3")
-        asyncio.run(task)  # Await the async task
-        print("Received message4")
-        return jsonify({"status": "OK"}), 200
-    except Exception as e:
-        print(f"Error: {e}")
-        return jsonify({"error": str(e)}), 500
+
+     # ✅ Run bot processing in a background thread
+    thread = threading.Thread(target=asyncio.run, args=(adapter.process_activity(activity, auth_header, call_echo_logic),))
+    thread.start()
+
+    # ✅ Return response immediately to avoid timeout
+    return jsonify({"status": "Processing"}), 202
 
 # Run Flask app (use for local testing; ignored in Azure App Service)
 if __name__ == "__main__":
