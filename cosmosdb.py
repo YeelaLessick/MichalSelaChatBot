@@ -14,3 +14,6 @@ def connect_to_cosmos(endpoint, key, database_name, container_name):
         partition_key=PartitionKey(path="/id")
     )
     return container
+
+def test():
+    pass
