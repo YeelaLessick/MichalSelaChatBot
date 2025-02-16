@@ -3,12 +3,11 @@ from botbuilder.core import BotFrameworkAdapter, BotFrameworkAdapterSettings, Tu
 from botbuilder.schema import Activity
 from azure.identity import ManagedIdentityCredential
 import asyncio
-from michal_sela_chatbot import initialize_chatbot, chat
+from michal_sela_chatbot import setup_chatbot, chat
 import os
 
 # Initialize Flask app
 app = Flask(__name__)
-chain_with_history = initialize_chatbot()
 
 # Bot Framework Adapter
 #client_secret = os.getenv("BOT_CLIENT_SECRET")
@@ -18,10 +17,14 @@ if not client_secret:
 settings = BotFrameworkAdapterSettings(app_id="b7548fae-2a32-4390-a564-156fba07f887",app_password=client_secret)
 adapter = BotFrameworkAdapter(settings)
 
+setup_chatbot()
+
 # Echo Bot logic
 async def bot_logic(turn_context: TurnContext):
+    """Handles messages from users, using a session-based chatbot."""
+    session_id = turn_context.activity.conversation.id 
     user_message = turn_context.activity.text
-    chatbot_response = chat(chain_with_history, user_message)
+    chatbot_response = chat(session_id, user_message)
     print("chatbot_response: ", chatbot_response)
     await turn_context.send_activity(chatbot_response)
 
