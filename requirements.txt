@@ -19,3 +19,4 @@ pandas
 azure.storage.blob
 python.bidi
 openpyxl
+threading

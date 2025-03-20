@@ -12,6 +12,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_openai import AzureChatOpenAI
+import re
 
 # Global storage for chatbot instance
 session_storage = {}
@@ -40,7 +41,7 @@ def setup_chatbot():
     # Define system message
     sys_msg = SystemMessage(
         content=(
-            "את צ'אטבוט בשם 'מיכל', שנוצר כדי לסייע למשתמשים המבקשים ליצור קשר עם 'פורום מיכל סלע', ארגון הפועל למניעת אלימות נגד נשים ולקידום בטיחותן."
+            "את צ'אטבוט בשם 'מיכל', שנוצר כדי לסייע למשתמשים המבקשים ליצור קשר עם 'פורום מיכל סלה', ארגון הפועל למניעת אלימות נגד נשים ולקידום בטיחותן."
             "תפקידך הוא לתמוך, לכוון ולספק מידע באופן אנושי, דיסקרטי וידידותי."
             "קהל היעד שלך:"
             "'שורדות אלימות': נשים שחוו או חוות אלימות."
@@ -151,14 +152,22 @@ def format_examples_and_communication(examples_text, communication_text):
 
     return formatted_examples, formatted_communication
 
+def escape_special_chars(text):
+    """Escapes special characters that might cause issues in Azure Bot Framework."""
+    if not text:
+        return text
+    return re.sub(r'([_*[\]()~`>#+\-=|{}.!])', r'\\\1', text)
+
 def chat(session_id, user_input):
     """Handles a chat request using the session-specific chatbot."""
     chatbot = get_chatbot()
     response = chatbot.invoke(
         {"user_input": user_input},
-        config={"configurable": {"session_id": session_id}},
+        config={"configurable": {"session_id": session_id}, "max_tokens": 150, "temperature": 0.4, "top_p": 0.7},
     )
-    return response.content
+    # Escape special characters before returning the response
+    safe_response = escape_special_chars(response.content)
+    return safe_response
 
 class InMemoryHistory(BaseChatMessageHistory, BaseModel):
     """Class to store chat history for each session."""
