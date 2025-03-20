@@ -5,6 +5,7 @@ from azure.identity import ManagedIdentityCredential
 import asyncio
 from michal_sela_chatbot import setup_chatbot, chat
 import threading
+from botbuilder.core import MessageFactory, InputHints
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -26,7 +27,8 @@ async def bot_logic(turn_context: TurnContext):
     user_message = turn_context.activity.text
     chatbot_response = chat(session_id, user_message)
     print("chatbot_response: ", chatbot_response)
-    await turn_context.send_activity(chatbot_response)
+    await turn_context.send_activity(
+    MessageFactory.text(chatbot_response, chatbot_response, InputHints.ignoring_input))
 
 @app.route('/')
 def index():
