@@ -12,7 +12,6 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_openai import AzureChatOpenAI
-import re
 
 # Global storage for chatbot instance
 session_storage = {}
@@ -153,10 +152,14 @@ def format_examples_and_communication(examples_text, communication_text):
     return formatted_examples, formatted_communication
 
 def escape_special_chars(text):
-    """Escapes special characters that might cause issues in Azure Bot Framework."""
+    """
+    Escapes Telegram's MarkdownV2 reserved characters.
+    """
     if not text:
         return text
-    return re.sub(r'([_*[\]()~`>#+\-=|{}.!])', r'\\\1', text)
+
+    escape_chars = r"_*[]()~`>#+-=|{}.!"
+    return "".join("\\" + c if c in escape_chars else c for c in text)
 
 def chat(session_id, user_input):
     """Handles a chat request using the session-specific chatbot."""
