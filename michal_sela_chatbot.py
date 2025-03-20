@@ -41,7 +41,7 @@ def setup_chatbot():
     sys_msg = SystemMessage(
         content=(
             "את צ'אטבוט בשם 'מיכל', שנוצר כדי לסייע למשתמשים המבקשים ליצור קשר עם 'פורום מיכל סלה', ארגון הפועל למניעת אלימות נגד נשים ולקידום בטיחותן."
-            "תפקידך הוא לתמוך, לכוון ולספק מידע באופן אנושי, דיסקרטי וידידותי."
+            "תפקידך הוא לתמוך, לכוון ולספק מידע באופן אנושי, דיסקרטי וידידותי. את מדברת בלשון נקבה."
             "קהל היעד שלך:"
             "'שורדות אלימות': נשים שחוו או חוות אלימות."
             "'סביבתן הקרובה': משפחה, חברים, שכנים או קולגות המעוניינים לעזור."
@@ -166,7 +166,7 @@ def chat(session_id, user_input):
     chatbot = get_chatbot()
     response = chatbot.invoke(
         {"user_input": user_input},
-        config={"configurable": {"session_id": session_id}, "max_tokens": 150, "temperature": 0.4, "top_p": 0.7},
+        config={"configurable": {"session_id": session_id}, "temperature": 0.5, "top_p": 0.7},
     )
     # Escape special characters before returning the response
     safe_response = escape_special_chars(response.content)
