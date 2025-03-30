@@ -1,0 +1,25 @@
+# Ignore Python virtual environment
+venv/
+.env
+*.env
+
+# Ignore compiled Python files
+__pycache__/
+*.py[cod]
+
+# Ignore logs and temporary files
+*.log
+*.out
+*.tmp
+
+# Ignore IDE & Editor files
+.vscode/
+.idea/
+*.swp
+
+# Ignore dependency files
+requirements.txt.lock
+Pipfile.lock
+
+# Ignore macOS system files
+.DS_Store
