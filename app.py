@@ -5,7 +5,6 @@ from azure.identity import ManagedIdentityCredential
 import asyncio
 from michal_sela_chatbot import setup_chatbot, chat
 import threading
-from botbuilder.core import MessageFactory, InputHints
 
 # Initialize Flask app
 app = Flask(__name__)
