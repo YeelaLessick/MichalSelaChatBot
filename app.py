@@ -25,10 +25,9 @@ async def bot_logic(turn_context: TurnContext):
     """Handles messages from users, using a session-based chatbot."""
     session_id = turn_context.activity.conversation.id 
     user_message = turn_context.activity.text
-    chatbot_response = chat(session_id, user_message)
+    chatbot_response = await chat(session_id, user_message)
     print("chatbot_response: ", chatbot_response)
-    await turn_context.send_activity(
-    MessageFactory.text(chatbot_response, chatbot_response, InputHints.ignoring_input))
+    await turn_context.send_activity(chatbot_response, chatbot_response, InputHints.ignoring_input)
 
 @app.route('/')
 def index():

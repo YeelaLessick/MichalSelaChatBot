@@ -161,14 +161,13 @@ def escape_special_chars(text):
     escape_chars = r"_*[]()~`>#+-=|{}.!"
     return "".join("\\" + c if c in escape_chars else c for c in text)
 
-def chat(session_id, user_input):
+async def chat(session_id, user_input):
     """Handles a chat request using the session-specific chatbot."""
     chatbot = get_chatbot()
-    response = chatbot.invoke(
+    response = await chatbot.ainvoke(
         {"user_input": user_input},
         config={"configurable": {"session_id": session_id}, "temperature": 0.5, "top_p": 0.7},
     )
-    # Escape special characters before returning the response
     safe_response = escape_special_chars(response.content)
     return safe_response
 
