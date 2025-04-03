@@ -26,7 +26,7 @@ async def bot_logic(turn_context: TurnContext):
     user_message = turn_context.activity.text
     chatbot_response = await chat(session_id, user_message)
     print("chatbot_response: ", chatbot_response)
-    await turn_context.send_activity(chatbot_response, chatbot_response)
+    await turn_context.send_activity(chatbot_response)
 
 @app.route('/')
 def index():
