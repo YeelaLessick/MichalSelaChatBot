@@ -13,6 +13,7 @@ from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_openai import AzureChatOpenAI
 import re
+import asyncio
 
 # Global storage for chatbot instance
 session_storage = {}
@@ -185,7 +186,10 @@ class InMemoryHistory(BaseChatMessageHistory, BaseModel):
 
 if __name__ == "__main__":
     setup_chatbot()
-    while True:
-        user_input = input(">>> ")
-        chatbot_response = chat("1", user_input)
-        print(get_display(chatbot_response))
+    async def main():
+        while True:
+            user_input = input(">>> ")
+            chatbot_response = await chat("1", user_input)
+            print(get_display(chatbot_response))
+    
+    asyncio.run(main())
