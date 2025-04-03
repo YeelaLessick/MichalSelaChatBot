@@ -5,6 +5,7 @@ from azure.identity import ManagedIdentityCredential
 import asyncio
 from michal_sela_chatbot import setup_chatbot, chat
 import threading
+import traceback
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -24,15 +25,33 @@ async def bot_logic(turn_context: TurnContext):
     """Handles messages from users, using a session-based chatbot."""
     session_id = turn_context.activity.conversation.id 
     user_message = turn_context.activity.text
-    chatbot_response = await chat(session_id, user_message)
-    print("chatbot_response: ", chatbot_response)
-    await turn_context.send_activity(chatbot_response)
-    await turn_context.send_activity(
-    Activity(
-        type=ActivityTypes.message,
-        text=chatbot_response,
-        text_format="plain"  # or "markdown" if you handle it
-    ))
+
+    try:
+        chatbot_response = await chat(session_id, user_message)
+        print("chatbot_response:", chatbot_response)
+
+        await turn_context.send_activity(
+            Activity(
+                type=ActivityTypes.message,
+                text=chatbot_response,
+                text_format="plain"  # or "markdown" if you handle it
+            )
+        )
+        
+    except Exception as e:
+        print("❌ Error in bot_logic:", e)
+        print("❌ Problematic message:", user_message)
+        print(traceback.format_exc())
+
+        # Hebrew fallback message
+        fallback_message = "משהו השתבש אצלנו, נסי שוב עוד רגע 💜"
+        await turn_context.send_activity(
+            Activity(
+                type=ActivityTypes.message,
+                text=fallback_message,
+                text_format="plain"
+            )
+        )
 
 @app.route('/')
 def index():
