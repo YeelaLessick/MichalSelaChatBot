@@ -1,21 +1,21 @@
-module "resource_group" {
-  source = "./resource_group"
+# module "resource_group" {
+#   source = "./resource_group"
 
-  location            = var.location
-  resource_group_name = var.resource_group_name
-}
+#   location            = var.location
+#   resource_group_name = var.resource_group_name
+# }
 
-module "storage_account" {
-  source = "./storage_account"
+# module "storage_account" {
+#   source = "./storage_account"
 
-  storage_account_name     = "mihcalseladata"          # The name of the storage account
-  location                 = var.location              # Use a variable for location
-  resource_group_name      = var.resource_group_name # Reference the resource group module
-  account_tier             = "Standard"               # Storage account tier
-  account_replication_type = "LRS"                    # Replication type
-  account_kind             = "StorageV2"              # Account kind (e.g., StorageV2)
-  access_tier              = "Hot"                    # Access tier (Hot or Cool)
-}
+#   storage_account_name     = "mihcalseladata"          # The name of the storage account
+#   location                 = var.location              # Use a variable for location
+#   resource_group_name      = var.resource_group_name # Reference the resource group module
+#   account_tier             = "Standard"               # Storage account tier
+#   account_replication_type = "LRS"                    # Replication type
+#   account_kind             = "StorageV2"              # Account kind (e.g., StorageV2)
+#   access_tier              = "Hot"                    # Access tier (Hot or Cool)
+# }
 
 module "storage_container" {
   source = "./storage_container"
@@ -55,31 +55,31 @@ module "subnet" {
   subnet2_service_endpoints                      = ["Microsoft.Storage"]
 }
 
-module "azure_bot" {
-  source = "./azure_bot"
-  
-  bot_name            = "michalselabot"
-  location            = var.location
-  sku                 = "F0"
-  resource_group_name = var.resource_group_name
-}
+# module "azure_bot" {
+#   source = "./azure_bot"
+#   
+#   bot_name            = "michalselabot"
+#   location            = var.location
+#   sku                 = "F0"
+#   resource_group_name = var.resource_group_name
+# }
 
-module "azure_openai" {
-  source              = "./azure_openai"
+# module "azure_openai" {
+#   source              = "./azure_openai"
 
-  openai_account_name = "michalsela-openai"
-  deployment_name     = "gpt4o1-mini-deployment"
-  location            = var.location
-  resource_group_name = var.resource_group_name
-}
+#   openai_account_name = "michalsela-openai"
+#   deployment_name     = "gpt4o1-mini-deployment"
+#   location            = var.location
+#   resource_group_name = var.resource_group_name
+# }
 
-module "app_service" {
-  source                = "./app_service"
+# module "app_service" {
+#   source                = "./app_service"
 
-  app_service_name      = "michalchatbotwebapp"
-  location              = var.location
-  resource_group_name   = var.resource_group_name
-  microsoft_app_id            = module.azure_bot.app_id       # Reuse Bot's App ID
-  microsoft_app_tenant_id         = module.azure_bot.tenant_id    # Reuse Bot's Tenant ID
-  repo_url              = "https://github.com/YeelaLessick/MichalSelaChatBot"
-}
+#   app_service_name      = "michalchatbotwebapp"
+#   location              = var.location
+#   resource_group_name   = var.resource_group_name
+#   microsoft_app_id            = module.azure_bot.app_id       # Reuse Bot's App ID
+#   microsoft_app_tenant_id         = module.azure_bot.tenant_id    # Reuse Bot's Tenant ID
+#   repo_url              = "https://github.com/YeelaLessick/MichalSelaChatBot"
+# }

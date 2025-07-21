@@ -1,6 +1,6 @@
 output "app_id" {
   description = "Application (client) ID of the AAD app"
-  value       = azuread_application_registration.bot_app.id
+  value       = azuread_application.bot_app.client_id
 }
 
 output "tenant_id" {
