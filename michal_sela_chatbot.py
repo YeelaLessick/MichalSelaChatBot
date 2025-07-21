@@ -153,15 +153,15 @@ def format_examples_and_communication(examples_text, communication_text):
 
     return formatted_examples, formatted_communication
 
-def escape_special_chars(text: str) -> str:
-    """
-    Escapes all characters that are reserved in Telegram MarkdownV2.
-    """
-    if not text:
-        return text
+# def escape_special_chars(text: str) -> str:
+#     """
+#     Escapes all characters that are reserved in Telegram MarkdownV2.
+#     """
+#     if not text:
+#         return text
 
-    escape_chars = r'_*\[\]()~`>#+-=|{}.!'
-    return re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', text)
+#     escape_chars = r'_*\[\]()~`>#+-=|{}.!'
+#     return re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', text)
 
 async def chat(session_id, user_input):
     """Handles a chat request using the session-specific chatbot."""
@@ -170,8 +170,8 @@ async def chat(session_id, user_input):
         {"user_input": user_input},
         config={"configurable": {"session_id": session_id}, "temperature": 0.5, "top_p": 0.7},
     )
-    safe_response = escape_special_chars(response.content)
-    return safe_response
+    #safe_response = escape_special_chars(response.content)
+    return response.content
 
 class InMemoryHistory(BaseChatMessageHistory, BaseModel):
     """Class to store chat history for each session."""
