@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 from botbuilder.core import BotFrameworkAdapter, BotFrameworkAdapterSettings, TurnContext
-from botbuilder.schema import Activity
+from botbuilder.schema import Activity, ActivityTypes
 from azure.identity import ManagedIdentityCredential
 import asyncio
 from michal_sela_chatbot import setup_chatbot, chat
@@ -29,6 +29,12 @@ async def bot_logic(turn_context: TurnContext):
     chatbot_response = await chat(session_id, user_message)
     print("chatbot_response: ", chatbot_response)
     await turn_context.send_activity(chatbot_response)
+    await turn_context.send_activity(
+    Activity(
+        type=ActivityTypes.message,
+        text=chatbot_response,
+        text_format="plain"  # or "markdown" if you handle it
+    ))
 
 @app.route('/')
 def index():
