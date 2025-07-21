@@ -11,11 +11,13 @@ from botbuilder.core import MessageFactory, InputHints
 app = Flask(__name__)
 
 # Bot Framework Adapter
-#client_secret = os.getenv("BOT_CLIENT_SECRET")
-client_secret = "-MJ8Q~mntwp0FCUncWjMWJ16qBolrfHxgKZ3qbHi"
-if not client_secret:
-    raise ValueError("BOT_CLIENT_SECRET is not set in the environment")
-settings = BotFrameworkAdapterSettings(app_id="b7548fae-2a32-4390-a564-156fba07f887",app_password=client_secret)
+app_password = os.getenv("MicrosoftAppPassword")
+app_id = os.getenv("MicrosoftAppId")
+if not app_password:
+    raise ValueError("MicrosoftAppPassword is not set in the environment")
+if not app_id:
+    raise ValueError("MicrosoftAppId is not set in the environment")
+settings = BotFrameworkAdapterSettings(app_id=app_id, app_password=app_password)
 adapter = BotFrameworkAdapter(settings)
 
 setup_chatbot()
