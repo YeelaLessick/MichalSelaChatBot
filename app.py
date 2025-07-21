@@ -6,6 +6,9 @@ import asyncio
 from michal_sela_chatbot import setup_chatbot, chat
 import threading
 import traceback
+import os
+
+print("Starting app")
 
 # Initialize Flask app
 app = Flask(__name__)
