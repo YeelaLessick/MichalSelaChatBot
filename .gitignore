@@ -23,3 +23,23 @@ Pipfile.lock
 
 # Ignore macOS system files
 .DS_Store
+
+# Ignore Terraform files
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup
+*.tfplan
+*.tfstate
+*.tfstate.*
+
+# Ignore Terraform state files in subdirectories
+**/terraform.tfstate
+**/terraform.tfstate.backup
+
+# Ignore large binaries and dependencies
+*.exe
+*.dll
+*.so
+*.dylib
+*.pyd
