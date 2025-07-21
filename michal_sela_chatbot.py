@@ -12,6 +12,8 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_openai import AzureChatOpenAI
+import re
+import asyncio
 
 # Global storage for chatbot instance
 session_storage = {}
@@ -151,15 +153,15 @@ def format_examples_and_communication(examples_text, communication_text):
 
     return formatted_examples, formatted_communication
 
-def escape_special_chars(text):
-    """
-    Escapes Telegram's MarkdownV2 reserved characters.
-    """
-    if not text:
-        return text
+# def escape_special_chars(text: str) -> str:
+#     """
+#     Escapes all characters that are reserved in Telegram MarkdownV2.
+#     """
+#     if not text:
+#         return text
 
-    escape_chars = r"_*[]()~`>#+-=|{}.!"
-    return "".join("\\" + c if c in escape_chars else c for c in text)
+#     escape_chars = r'_*\[\]()~`>#+-=|{}.!'
+#     return re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', text)
 
 async def chat(session_id, user_input):
     """Handles a chat request using the session-specific chatbot."""
@@ -168,8 +170,8 @@ async def chat(session_id, user_input):
         {"user_input": user_input},
         config={"configurable": {"session_id": session_id}, "temperature": 0.5, "top_p": 0.7},
     )
-    safe_response = escape_special_chars(response.content)
-    return safe_response
+    #safe_response = escape_special_chars(response.content)
+    return response.content
 
 class InMemoryHistory(BaseChatMessageHistory, BaseModel):
     """Class to store chat history for each session."""
@@ -184,7 +186,10 @@ class InMemoryHistory(BaseChatMessageHistory, BaseModel):
 
 if __name__ == "__main__":
     setup_chatbot()
-    while True:
-        user_input = input(">>> ")
-        chatbot_response = chat("1", user_input)
-        print(get_display(chatbot_response))
+    async def main():
+        while True:
+            user_input = input(">>> ")
+            chatbot_response = await chat("1", user_input)
+            print(get_display(chatbot_response))
+    
+    asyncio.run(main())
