@@ -33,6 +33,10 @@ terraform.tfstate.backup
 *.tfstate
 *.tfstate.*
 
+# Ignore Terraform state files in subdirectories
+**/terraform.tfstate
+**/terraform.tfstate.backup
+
 # Ignore large binaries and dependencies
 *.exe
 *.dll
