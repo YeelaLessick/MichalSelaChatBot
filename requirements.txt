@@ -18,5 +18,5 @@ pandas
 azure.storage.blob
 python.bidi
 openpyxl
-botbuilder-core
-botbuilder-schema
+azure-communication-messages
+azure-eventgrid
