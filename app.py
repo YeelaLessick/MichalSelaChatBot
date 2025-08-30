@@ -30,7 +30,7 @@ async def bot_logic(turn_context: TurnContext):
     """Handles messages from users, using a session-based chatbot."""
     session_id = turn_context.activity.conversation.id 
     user_message = turn_context.activity.text
-
+    
     try:
         chatbot_response = await chat(session_id, user_message)
         print("chatbot_response:", chatbot_response)
