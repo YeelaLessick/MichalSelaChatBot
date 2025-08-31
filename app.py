@@ -1,7 +1,6 @@
 from flask import Flask, request, jsonify
 from botbuilder.core import BotFrameworkAdapter, BotFrameworkAdapterSettings, TurnContext
 from botbuilder.schema import Activity, ActivityTypes
-from azure.identity import ManagedIdentityCredential
 import asyncio
 import threading
 import traceback
@@ -22,15 +21,9 @@ app_type = os.getenv("MicrosoftAppType", "ManagedIdentity")
 if not app_id:
     raise ValueError("MicrosoftAppId is not set in the environment")
 
-# Create Managed Identity credential
-credential = ManagedIdentityCredential()
-
-# Bot Framework Adapter with Managed Identity
-settings = BotFrameworkAdapterSettings(
-    app_id=app_id,
-    credential=credential,  # Use Managed Identity instead of password
-    to_channel_from_bot_oauth_scope="https://api.botframework.com"
-)
+# For Managed Identity, Bot Framework automatically handles authentication
+# when app_password is None and MicrosoftAppType is "ManagedIdentity"
+settings = BotFrameworkAdapterSettings(app_id=app_id)
 adapter = BotFrameworkAdapter(settings)
 
 # Initialize chatbot
