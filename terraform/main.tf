@@ -1,85 +1,160 @@
-# module "resource_group" {
-#   source = "./resource_group"
+# Main Infrastructure Configuration
+# Use with environment-specific .tfvars files
 
-#   location            = var.location
-#   resource_group_name = var.resource_group_name
-# }
+module "resource_group" {
+  source = "./resource_group"
+
+  location            = var.location
+  resource_group_name = var.resource_group_name
+}
 
 # module "storage_account" {
 #   source = "./storage_account"
 
-#   storage_account_name     = "mihcalseladata"          # The name of the storage account
-#   location                 = var.location              # Use a variable for location
-#   resource_group_name      = var.resource_group_name # Reference the resource group module
-#   account_tier             = "Standard"               # Storage account tier
-#   account_replication_type = "LRS"                    # Replication type
-#   account_kind             = "StorageV2"              # Account kind (e.g., StorageV2)
-#   access_tier              = "Hot"                    # Access tier (Hot or Cool)
+#   storage_account_name     = var.storage_account_name
+#   location                = var.location
+#   resource_group_name     = module.resource_group.resource_group_name
+#   account_tier            = "Standard"
+#   account_replication_type = "LRS"
+#   account_kind            = "StorageV2"
+#   access_tier             = "Hot"
+
+#   depends_on = [module.resource_group]
 # }
 
-module "storage_container" {
-  source = "./storage_container"
+module "azure_bot" {
+  source = "./azure_bot"
 
-  container_name                 = "data"
-  storage_account_name           = module.storage_account.storage_account_name # Reference from the storage account module
+  bot_name                   = var.bot_name
+  location                   = var.location
+  resource_group_name        = module.resource_group.resource_group_name
+  sku                        = var.bot_sku
+  messaging_endpoint         = var.bot_messaging_endpoint
+  managed_identity_client_id = module.managed_identity_bot.identity_client_id
+  managed_identity_id        = module.managed_identity_bot.identity_id
+
+  depends_on = [module.resource_group, module.managed_identity_bot]
+}
+
+module "app_service" {
+  source = "./app_service"
+
+  resource_group_name   = module.resource_group.resource_group_name
+  location             = var.location
+  app_service_plan_name = var.app_service_plan_name
+  app_service_name     = var.app_service_name
+  sku_name             = var.sku_name
+
+  # Bot Framework integration - using Managed Identity
+  microsoft_app_id       = module.azure_bot.app_id
+  microsoft_app_tenant_id = module.azure_bot.tenant_id
+
+  # Azure OpenAI integration
+  azure_openai_api_key        = module.azure_openai.openai_api_key
+  azure_openai_endpoint       = module.azure_openai.openai_endpoint
+  azure_openai_api_version    = var.azure_openai_api_version
+  azure_openai_deployment_name = module.azure_openai.gpt4_deployment_name
+
+  # Networking configuration
+  virtual_network_subnet_id = module.virtual_network.subnet_id
+
+  # App configuration
+  linux_fx_version    = "PYTHON|3.12"
+  always_on          = var.sku_name != "F1" ? true : false  # Always on not available for F1
+  scm_type           = "GitHubAction"
+
+  # Source control configuration
+  repo_url    = var.repo_url
+  repo_branch = var.repo_branch
+
+  # Additional app settings
+  additional_app_settings = {
+    ENVIRONMENT = var.environment
+    MicrosoftAppType = "ManagedIdentity"
+  }
+
+  depends_on = [module.resource_group, module.azure_bot, module.azure_openai, module.virtual_network]
+}
+
+module "azure_openai" {
+  source = "./azure_openai"
+
+  openai_account_name = var.openai_account_name
+  deployment_name     = var.openai_deployment_name
+  location           = "eastus" 
+  resource_group_name = module.resource_group.resource_group_name
+
+  depends_on = [module.resource_group]
+}
+
+module "cosmosdb" {
+  source = "./cosmosdb"
+
+  cosmosdb_name       = var.cosmosdb_name
+  location           = "israelcentral"
+  resource_group_name = module.resource_group.resource_group_name
+  enable_free_tier   = var.cosmosdb_enable_free_tier
+  ip_range_filter    = var.cosmosdb_ip_range_filter
+  tags               = var.tags
+
+  depends_on = [module.resource_group]
+}
+
+module "communication_service" {
+  source = "./communication_service"
+
+  communication_service_name = var.communication_service_name
+  resource_group_name       = module.resource_group.resource_group_name
+  data_location            = var.communication_data_location
+  tags                     = var.tags
+
+  depends_on = [module.resource_group]
 }
 
 module "virtual_network" {
   source = "./virtual_network"
 
-  vnet_name                = "vnet-sjsvtepn"
-  location                 = var.location
-  resource_group_name      = var.resource_group_name # Reference the resource group module
-  address_space            = ["10.0.0.0/16"]
+  vnet_name                   = var.vnet_name
+  location                   = var.location
+  resource_group_name        = module.resource_group.resource_group_name
+  address_space              = var.vnet_address_space
+  subnet_name                = var.subnet_name
+  subnet_address_prefixes    = var.subnet_address_prefixes
+  service_endpoints          = var.subnet_service_endpoints
+  tags                       = var.tags
+
+  depends_on = [module.resource_group]
 }
 
+module "managed_identity_app_service" {
+  source = "./managed_identity"
 
-module "private_dns" {
-  source = "./private_dns"
+  identity_name       = var.app_service_identity_name
+  location           = var.location
+  resource_group_name = module.resource_group.resource_group_name
+  tags               = var.tags
 
-  private_dns_zone_name   = "privatelink.mongo.cosmos.azure.com"
-  resource_group_name     = var.resource_group_name
-  dns_zone_vnet_link_name = "link-biwvnsgqc6gp4"
-  virtual_network_id      = module.virtual_network.vnet_id
+  depends_on = [module.resource_group]
 }
 
-module "subnet" {
-  source = "./subnet"
+module "managed_identity_bot" {
+  source = "./managed_identity"
 
-  resource_group_name                            = var.resource_group_name
-  virtual_network_name                           = module.virtual_network.vnet_name
-  subnet1_name                                   = "subnet-biwvnsgqc6gp4"
-  subnet1_address_prefixes                       = ["10.0.2.0/24"]
-  subnet2_name                                   = "subnet-tvektdbl"
-  subnet2_address_prefixes                       = ["10.0.1.0/24"]
-  subnet2_service_endpoints                      = ["Microsoft.Storage"]
+  identity_name       = var.bot_identity_name
+  location           = var.location
+  resource_group_name = module.resource_group.resource_group_name
+  tags               = var.tags
+
+  depends_on = [module.resource_group]
 }
 
-# module "azure_bot" {
-#   source = "./azure_bot"
-#   
-#   bot_name            = "michalselabot"
-#   location            = var.location
-#   sku                 = "F0"
-#   resource_group_name = var.resource_group_name
-# }
+module "managed_identity_openai" {
+  source = "./managed_identity"
 
-# module "azure_openai" {
-#   source              = "./azure_openai"
+  identity_name       = var.openai_identity_name
+  location           = var.location
+  resource_group_name = module.resource_group.resource_group_name
+  tags               = var.tags
 
-#   openai_account_name = "michalsela-openai"
-#   deployment_name     = "gpt4o1-mini-deployment"
-#   location            = var.location
-#   resource_group_name = var.resource_group_name
-# }
-
-# module "app_service" {
-#   source                = "./app_service"
-
-#   app_service_name      = "michalchatbotwebapp"
-#   location              = var.location
-#   resource_group_name   = var.resource_group_name
-#   microsoft_app_id            = module.azure_bot.app_id       # Reuse Bot's App ID
-#   microsoft_app_tenant_id         = module.azure_bot.tenant_id    # Reuse Bot's Tenant ID
-#   repo_url              = "https://github.com/YeelaLessick/MichalSelaChatBot"
-# }
+  depends_on = [module.resource_group]
+}

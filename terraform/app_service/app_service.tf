@@ -24,6 +24,12 @@ resource "azurerm_linux_web_app" "main" {
       MicrosoftAppTenantId = var.microsoft_app_tenant_id
       MicrosoftAppType     = "ManagedIdentity"
     } : {},
+    var.azure_openai_api_key != null ? {
+      AZURE_OPENAI_API_KEY     = var.azure_openai_api_key
+      AZURE_OPENAI_ENDPOINT    = var.azure_openai_endpoint
+      AZURE_OPENAI_API_VERSION = var.azure_openai_api_version
+      DEPLOYMENT_NAME          = var.azure_openai_deployment_name
+    } : {},
     var.additional_app_settings
   )
 

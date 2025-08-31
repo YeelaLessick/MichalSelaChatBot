@@ -97,3 +97,29 @@ variable "repo_branch" {
   type        = string
   default     = "main"
 }
+
+# Azure OpenAI Configuration
+variable "azure_openai_api_key" {
+  description = "Azure OpenAI API key"
+  type        = string
+  sensitive   = true
+  default     = null
+}
+
+variable "azure_openai_endpoint" {
+  description = "Azure OpenAI endpoint URL"
+  type        = string
+  default     = null
+}
+
+variable "azure_openai_api_version" {
+  description = "Azure OpenAI API version"
+  type        = string
+  default     = "2024-02-01"
+}
+
+variable "azure_openai_deployment_name" {
+  description = "Azure OpenAI deployment name"
+  type        = string
+  default     = null
+}
