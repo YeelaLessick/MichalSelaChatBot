@@ -1,8 +1,9 @@
 flask
-botbuilder-core
-botbuilder-schema
+botbuilder-core>=4.15.0
+botbuilder-schema>=4.15.0
+botbuilder-integration-aiohttp>=4.15.0
 aiohttp
-azure.identity
+azure-identity>=1.13.0
 ipykernel==6.29.4
 langchain-core==0.2.0
 langchain==0.2.0

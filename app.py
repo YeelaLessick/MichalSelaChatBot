@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify
-from botbuilder.core import BotFrameworkAdapter, BotFrameworkAdapterSettings, TurnContext
+from botbuilder.integration.aiohttp import CloudAdapter, ConfigurationBotFrameworkAuthentication
+from botbuilder.core import TurnContext
 from botbuilder.schema import Activity, ActivityTypes
 import asyncio
 import threading
@@ -8,26 +9,19 @@ import os
 from michal_sela_chatbot import setup_chatbot
 from bot_framework_handler import handle_bot_framework_message
 from whatsapp_handler import handle_whatsapp_webhook, handle_whatsapp_options
+from config import DefaultConfig
 
 print("Starting app")
 
 # Initialize Flask app
 app = Flask(__name__)
 
-# Bot Framework Adapter with User-Assigned Managed Identity
-app_id = os.getenv("MicrosoftAppId")
-app_type = os.getenv("MicrosoftAppType", "UserAssignedMSI")
+# Create configuration (instantiate the class)
+CONFIG = DefaultConfig()
 
-if not app_id:
-    raise ValueError("MicrosoftAppId is not set in the environment")
-
-# For User-Assigned Managed Identity, Bot Framework handles authentication
-# when app_type is "UserAssignedMSI"
-settings = BotFrameworkAdapterSettings(
-    app_id=app_id,
-    app_type=app_type
-)
-adapter = BotFrameworkAdapter(settings)
+# Create adapter using CloudAdapter with ConfigurationBotFrameworkAuthentication
+# This automatically handles User-Assigned Managed Identity based on environment variables
+adapter = CloudAdapter(ConfigurationBotFrameworkAuthentication(CONFIG))
 
 # Initialize chatbot
 setup_chatbot()
