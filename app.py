@@ -14,16 +14,19 @@ print("Starting app")
 # Initialize Flask app
 app = Flask(__name__)
 
-# Bot Framework Adapter with Managed Identity
+# Bot Framework Adapter with User-Assigned Managed Identity
 app_id = os.getenv("MicrosoftAppId")
-app_type = os.getenv("MicrosoftAppType", "ManagedIdentity")
+app_type = os.getenv("MicrosoftAppType", "UserAssignedMSI")
 
 if not app_id:
     raise ValueError("MicrosoftAppId is not set in the environment")
 
-# For Managed Identity, Bot Framework automatically handles authentication
-# when app_password is None and MicrosoftAppType is "ManagedIdentity"
-settings = BotFrameworkAdapterSettings(app_id=app_id)
+# For User-Assigned Managed Identity, Bot Framework handles authentication
+# when app_type is "UserAssignedMSI"
+settings = BotFrameworkAdapterSettings(
+    app_id=app_id,
+    app_type=app_type
+)
 adapter = BotFrameworkAdapter(settings)
 
 # Initialize chatbot
