@@ -46,7 +46,7 @@ def messages():
         await handle_bot_framework_message(turn_context)
 
     # Run bot processing in a background thread
-    thread = threading.Thread(target=asyncio.run, args=(adapter.process_activity(activity, auth_header, call_bot_framework_logic),))
+    thread = threading.Thread(target=asyncio.run, args=(adapter.process_activity(auth_header, activity, call_bot_framework_logic),))
     thread.start()
 
     # Return response immediately to avoid timeout
