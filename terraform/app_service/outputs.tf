@@ -35,12 +35,12 @@ output "app_service_plan_name" {
 
 output "app_service_identity_principal_id" {
   description = "The Principal ID of the App Service's managed identity"
-  value       = azurerm_linux_web_app.main.identity[0].principal_id
+  value       = length(azurerm_linux_web_app.main.identity) > 0 ? azurerm_linux_web_app.main.identity[0].principal_id : null
 }
 
 output "app_service_identity_tenant_id" {
   description = "The Tenant ID of the App Service's managed identity"
-  value       = azurerm_linux_web_app.main.identity[0].tenant_id
+  value       = length(azurerm_linux_web_app.main.identity) > 0 ? azurerm_linux_web_app.main.identity[0].tenant_id : null
 }
 
 output "app_service_site_credential" {

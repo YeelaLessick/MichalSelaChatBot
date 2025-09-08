@@ -8,12 +8,12 @@ environment         = "prod"
 storage_account_name = "samichalselaprod01"
 
 # Azure Bot
-bot_name = "michalSelaBot"
+bot_name = "michalsela-azurebot"
 bot_sku  = "F0"
 bot_messaging_endpoint = "https://michalsela-app.azurewebsites.net/api/messages"
 
 # App Service
-app_service_plan_name = "michalsela-asp-prod"
+app_service_plan_name = "ASP-michalselabotprodrg-a6ff"
 app_service_name      = "michalsela-app"
 sku_name              = "B1"
 
@@ -26,8 +26,8 @@ openai_account_name     = "michalsela-openai"
 openai_deployment_name  = "gpt-4.1"
 
 # Cosmos DB
-cosmosdb_name           = "michalsela-cosmos"
-cosmosdb_enable_free_tier = true
+cosmosdb_name           = "michalsela-cosmosdb"
+cosmosdb_enable_free_tier = false
 cosmosdb_ip_range_filter = ""
 
 # Communication Service
