@@ -123,3 +123,9 @@ variable "azure_openai_deployment_name" {
   type        = string
   default     = null
 }
+
+variable "managed_identity_id" {
+  description = "ID of the User-Assigned Managed Identity"
+  type        = string
+  default     = null
+}

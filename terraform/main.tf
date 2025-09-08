@@ -45,9 +45,10 @@ module "app_service" {
   app_service_name     = var.app_service_name
   sku_name             = var.sku_name
 
-  # Bot Framework integration - using Managed Identity
+  # Bot Framework integration - using User-Assigned Managed Identity
   microsoft_app_id       = module.azure_bot.app_id
   microsoft_app_tenant_id = module.azure_bot.tenant_id
+  managed_identity_id    = module.managed_identity_bot.identity_id
 
   # Azure OpenAI integration
   azure_openai_api_key        = module.azure_openai.openai_api_key
@@ -70,10 +71,9 @@ module "app_service" {
   # Additional app settings
   additional_app_settings = {
     ENVIRONMENT = var.environment
-    MicrosoftAppType = "ManagedIdentity"
   }
 
-  depends_on = [module.resource_group, module.azure_bot, module.azure_openai, module.virtual_network]
+  depends_on = [module.resource_group, module.azure_bot, module.azure_openai, module.virtual_network, module.managed_identity_bot]
 }
 
 module "azure_openai" {

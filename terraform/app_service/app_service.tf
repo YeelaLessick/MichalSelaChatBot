@@ -22,7 +22,7 @@ resource "azurerm_linux_web_app" "main" {
     var.microsoft_app_id != null ? {
       MicrosoftAppId       = var.microsoft_app_id
       MicrosoftAppTenantId = var.microsoft_app_tenant_id
-      MicrosoftAppType     = "ManagedIdentity"
+      MicrosoftAppType     = "UserAssignedMSI"
     } : {},
     var.azure_openai_api_key != null ? {
       AZURE_OPENAI_API_KEY     = var.azure_openai_api_key
@@ -89,20 +89,21 @@ resource "azurerm_linux_web_app" "main" {
   # Logging configuration
   logs {
     application_logs {
-      file_system_level = "Off"
+      file_system_level = "Verbose"
     }
 
     http_logs {
       file_system {
-        retention_in_days = 0
+        retention_in_days = 7
         retention_in_mb   = var.http_logs_retention_mb
       }
     }
   }
 
-  # Managed Identity
+  # User-Assigned Managed Identity
   identity {
-    type = "SystemAssigned"
+    type         = "UserAssigned"
+    identity_ids = var.managed_identity_id != null ? [var.managed_identity_id] : []
   }
 
   lifecycle {
