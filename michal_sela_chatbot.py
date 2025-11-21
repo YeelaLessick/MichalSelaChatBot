@@ -14,6 +14,7 @@ from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_openai import AzureChatOpenAI
 import re
 import asyncio
+from cosmosdb import is_end_conversation_message, send_convessation_to_cosmos, connect_to_cosmos
 
 # Global storage for chatbot instance
 session_storage = {}
@@ -113,7 +114,6 @@ def load_env_variables():
         "api_version": os.getenv("AZURE_OPENAI_API_VERSION"),
     }
 
-
 def get_data_from_blob():
     connection_string = "DefaultEndpointsProtocol=https;AccountName=samichalselaprod01;AccountKey=ThgCKgZT5h61GMq/OPqADv/R7B1oe8ODprIR0MSInTHL/toAUWC6j+fvk38ZzCiEVhgsGESXsKKk+AStOlwjxw==;EndpointSuffix=core.windows.net"
     blob_service_client = BlobServiceClient.from_connection_string(connection_string)
@@ -130,7 +130,6 @@ def get_data_from_blob():
     loader = PyPDFLoader(download_path)
     documents = loader.load()
     return " ".join([doc.page_content for doc in documents])
-
 
 def excel_to_json(sheet):
     df = pd.read_excel("./michalseladata.xlsx", sheet_name=sheet)
@@ -193,6 +192,11 @@ def format_examples_and_communication(examples_text, communication_text):
 async def chat(session_id, user_input):
     """Handles a chat request using the session-specific chatbot."""
     chatbot = get_chatbot()
+    
+    # check if the last message is the "end conversation" message and send to cosmos db if it is
+    if is_end_conversation_message(user_input):
+        s
+
     response = await chatbot.ainvoke(
         {"user_input": user_input},
         config={"configurable": {"session_id": session_id}, "temperature": 0.5, "top_p": 0.7},

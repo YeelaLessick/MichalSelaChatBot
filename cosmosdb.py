@@ -15,5 +15,17 @@ def connect_to_cosmos(endpoint, key, database_name, container_name):
     )
     return container
 
+# send all the conversation messages to cosmos db as is, no encryption
+def send_convessation_to_cosmos(container, session_id, messages):
+    item = {
+        "id": session_id,
+        "messages": messages
+    }
+    container.upsert_item(item)
+
+# check if the convestaion end message was sent
+def is_end_conversation_message(last_message):
+    return last_message.strip().lower() == "end"
+
 def test():
     pass
