@@ -25,7 +25,10 @@ def send_convessation_to_cosmos(container, session_id, messages):
 
 # check if the convestaion end message was sent
 def is_end_conversation_message(last_message):
-    return last_message.strip().lower() == "end"
+    if last_message.strip().lower() == "end":
+        print("End of conversation detected.")
+        return True
+    return False
 
 def test():
     pass
