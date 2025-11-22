@@ -27,8 +27,9 @@ class BotFrameworkHandler:
             
             # check for None user_message
             if user_message is None:
-                user_message = ""
-                
+                # skip processing and keep listening
+                return
+                            
             # Process the message through the chatbot
             chatbot_response = await chat(session_id, user_message)
             print(f"✅ Chatbot response: {chatbot_response}")
