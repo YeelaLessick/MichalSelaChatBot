@@ -83,6 +83,13 @@ def setup_chatbot():
 
     chain = prompt | llm
 
+    connect_to_cosmos(
+        endpoint=os.getenv("COSMOSDB_ENDPOINT"),
+        key=os.getenv("COSMOSDB_KEY"),
+        database_name="MichalSelaDB",
+        container_name="Chats",
+    )
+
     # Function to handle per-user session history
     def get_history(session_id):
         if session_id not in session_storage:
@@ -192,16 +199,20 @@ def format_examples_and_communication(examples_text, communication_text):
 async def chat(session_id, user_input):
     """Handles a chat request using the session-specific chatbot."""
     chatbot = get_chatbot()
-    
-    # check if the last message is the "end conversation" message and send to cosmos db if it is
-    if is_end_conversation_message(user_input):
-        s
+
+    if user_input is None:
+        user_input = ""
+
+    if is_end_conversation_message(user_input): #change to: (chatbot.messages[-1])
+        send_convessation_to_cosmos(chatbot.history_container, session_id)
 
     response = await chatbot.ainvoke(
         {"user_input": user_input},
         config={"configurable": {"session_id": session_id}, "temperature": 0.5, "top_p": 0.7},
     )
     #safe_response = escape_special_chars(response.content)
+    if response is None or response.content is None:
+        return ""
     return response.content
 
 class InMemoryHistory(BaseChatMessageHistory, BaseModel):
