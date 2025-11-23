@@ -192,13 +192,25 @@ def format_examples_and_communication(examples_text, communication_text):
 
 async def chat(session_id, user_input):
     """Handles a chat request using the session-specific chatbot."""
-    chatbot = get_chatbot()
-    response = await chatbot.ainvoke(
-        {"user_input": user_input},
-        config={"configurable": {"session_id": session_id}, "temperature": 0.5, "top_p": 0.7},
-    )
-    #safe_response = escape_special_chars(response.content)
-    return response.content
+    try:
+        chatbot = get_chatbot()
+        response = await chatbot.ainvoke(
+            {"user_input": user_input},
+            config={"configurable": {"session_id": session_id}, "temperature": 0.5, "top_p": 0.7},
+        )
+        
+        # Validate response content exists
+        if response is None or not hasattr(response, 'content') or response.content is None:
+            print(f"⚠️ Warning: Empty response from chatbot for session {session_id}")
+            return "משהו השתבש, אנא נסי שוב 💜"
+        
+        #safe_response = escape_special_chars(response.content)
+        return response.content
+        
+    except Exception as e:
+        print(f"❌ Error in chat function for session {session_id}: {e}")
+        print(traceback.format_exc())
+        return "משהו השתבש, אנא נסי שוב 💜"
 
 class InMemoryHistory(BaseChatMessageHistory, BaseModel):
     """Class to store chat history for each session."""
