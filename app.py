@@ -87,21 +87,41 @@ def whatsapp_webhook():
             request_headers = {key.lower(): value for key, value in request.headers.items()}
             request_body = request.get_data(as_text=True)
             
-            # Process webhook in a background thread to avoid timeout
-            async def process_webhook():
-                try:
-                    result = await handle_whatsapp_webhook(request_headers, request_body)
-                    print(f"✅ WhatsApp webhook processed: {result}")
-                except Exception as e:
-                    print(f"❌ Error processing WhatsApp webhook: {e}")
-                    print(traceback.format_exc())
+            # Check if this is a subscription validation request
+            event_type = request_headers.get("aeg-event-type", "")
             
-            # Start background processing
-            thread = threading.Thread(target=asyncio.run, args=(process_webhook(),))
-            thread.start()
+            if event_type == "SubscriptionValidation":
+                # Handle validation synchronously - Event Grid needs immediate response
+                print("🔐 Handling Event Grid subscription validation")
+                async def validate():
+                    return await handle_whatsapp_webhook(request_headers, request_body)
+                
+                result = asyncio.run(validate())
+                
+                # Return validation response immediately
+                if "validationResponse" in result:
+                    print(f"✅ Returning validation response")
+                    return jsonify({"validationResponse": result["validationResponse"]}), 200
+                else:
+                    print(f"❌ Validation failed: {result}")
+                    return jsonify({"error": result.get("error", "Validation failed")}), result.get("status", 400)
             
-            # Return immediate response to Event Grid
-            return jsonify({"status": "Processing"}), 202
+            else:
+                # Handle notifications asynchronously to avoid timeout
+                async def process_webhook():
+                    try:
+                        result = await handle_whatsapp_webhook(request_headers, request_body)
+                        print(f"✅ WhatsApp webhook processed: {result}")
+                    except Exception as e:
+                        print(f"❌ Error processing WhatsApp webhook: {e}")
+                        print(traceback.format_exc())
+                
+                # Start background processing
+                thread = threading.Thread(target=asyncio.run, args=(process_webhook(),))
+                thread.start()
+                
+                # Return immediate response to Event Grid
+                return jsonify({"status": "Processing"}), 202
             
         except Exception as e:
             print(f"❌ Error in WhatsApp webhook handler: {e}")
