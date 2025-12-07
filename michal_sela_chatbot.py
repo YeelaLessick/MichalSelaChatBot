@@ -31,6 +31,9 @@ def setup_chatbot():
         "endpoint": os.getenv("AZURE_OPENAI_ENDPOINT"),
         "deployment_name": os.getenv("DEPLOYMENT_NAME"),
         "api_version": os.getenv("AZURE_OPENAI_API_VERSION"),
+        "connection_string": os.getenv("COSMOSDB_CONNECTIONS_STRING"),
+        "database_name": os.getenv("COSMOSDB_DATABASE"),
+        "container_name": os.getenv("COSMOSDB_CONTAINER"),
     }
 
     # Load data for examples and communication centers
@@ -84,10 +87,9 @@ def setup_chatbot():
     chain = prompt | llm
 
     connect_to_cosmos(
-        endpoint=os.getenv("COSMOSDB_ENDPOINT"),
-        key=os.getenv("COSMOSDB_KEY"),
-        database_name="MichalSelaDB",
-        container_name="Chats",
+        env_vars["connection_string"],
+        env_vars["database_name"],
+        env_vars["container_name"],
     )
 
     # Function to handle per-user session history
@@ -111,15 +113,6 @@ def get_chatbot():
     if chatbot_chain is None:
         raise RuntimeError("❌ Chatbot not initialized. Call setup_chatbot() first.")
     return chatbot_chain
-
-def load_env_variables():
-    load_dotenv(override=True)
-    return {
-        "key": os.getenv("AZURE_OPENAI_API_KEY"),
-        "endpoint": os.getenv("AZURE_OPENAI_ENDPOINT"),
-        "deployment_name": os.getenv("DEPLOYMENT_NAME"),
-        "api_version": os.getenv("AZURE_OPENAI_API_VERSION"),
-    }
 
 def get_data_from_blob():
     connection_string = "DefaultEndpointsProtocol=https;AccountName=samichalselaprod01;AccountKey=ThgCKgZT5h61GMq/OPqADv/R7B1oe8ODprIR0MSInTHL/toAUWC6j+fvk38ZzCiEVhgsGESXsKKk+AStOlwjxw==;EndpointSuffix=core.windows.net"

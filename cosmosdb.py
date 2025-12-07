@@ -5,21 +5,22 @@ import json
 # Encryption key should be securely stored and retrieved, e.g., from Azure Key Vault
 encryption_key = Fernet.generate_key()  # TODO: Placeholder; in production use a securely stored key
 cipher = Fernet(encryption_key)
+container = None
 
-def connect_to_cosmos(endpoint, key, database_name, container_name):
-    client = CosmosClient(endpoint, key)
-    database = client.create_database_if_not_exists(id=database_name)
-    container = database.create_container_if_not_exists(
-        id=container_name,
-        partition_key=PartitionKey(path="/id")
-    )
-    return container
+def connect_to_cosmos(connection_string, database_name, container_name):
+    global container
+    client = CosmosClient.from_connection_string(connection_string)
+    database = client.get_database_client(database_name)
+    container = database.get_container_client(container_name)
 
 # send all the conversation messages to cosmos db as is, no encryption
-def send_convessation_to_cosmos(container, session_id, messages):
+def send_convessation_to_cosmos(session_id, messages):
+    global container
+    if container is None:
+        raise Exception("Cosmos DB container is not connected.")
     item = {
-        "id": session_id,
-        "messages": messages
+        "SessionId": session_id,
+        "Conversation": messages
     }
     container.upsert_item(item)
 
