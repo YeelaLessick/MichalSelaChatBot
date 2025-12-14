@@ -198,6 +198,7 @@ async def chat(session_id, user_input):
 
     if is_end_conversation_message(user_input): #change to: (chatbot.messages[-1])
         send_convessation_to_cosmos(chatbot.history_container, session_id)
+        return "השיחה הסתיימה. תודה שפנית אלינו."
 
     response = await chatbot.ainvoke(
         {"user_input": user_input},
