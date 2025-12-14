@@ -8,6 +8,8 @@ cipher = Fernet(encryption_key)
 container = None
 
 def connect_to_cosmos(connection_string, database_name, container_name):
+    if connection_string is None or database_name is None or container_name is None:
+        raise ValueError("Cosmos DB connection parameters must be provided.")
     global container
     client = CosmosClient.from_connection_string(connection_string)
     database = client.get_database_client(database_name)
