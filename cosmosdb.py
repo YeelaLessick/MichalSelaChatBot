@@ -19,6 +19,7 @@ def messages_to_json(messages):
                 "type": str(msg.type) if hasattr(msg, 'type') else "unknown",
                 "content": str(msg.content) if hasattr(msg, 'content') else "",
             }
+            print(f"🔍 Serializing message: {msg_dict}")
             serialized.append(msg_dict)
         except Exception as e:
             print(f"⚠️  Error serializing message: {str(e)}")
@@ -52,7 +53,6 @@ def send_convessation_to_cosmos(session_id, messages):
             "SessionId": session_id,
             "Conversation": messages_to_json(messages)
         }
-        print(f"Storing conversation for session {session_id} to Cosmos DB")
         container.upsert_item(item)
         print(f"✅ Conversation stored successfully for session {session_id}")
     except Exception as e:
