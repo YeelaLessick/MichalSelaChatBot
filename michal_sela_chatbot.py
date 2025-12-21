@@ -196,18 +196,28 @@ async def chat(session_id, user_input):
     if user_input is None:
         user_input = ""
 
-    if is_end_conversation_message(user_input): #change to: (chatbot.messages[-1])
-        send_convessation_to_cosmos(chatbot.history_container, session_id)
+    if is_end_conversation_message(user_input):
+        history = session_storage.get(session_id)
+        if history:
+            send_convessation_to_cosmos(session_id, history.messages)
         return "השיחה הסתיימה. תודה שפנית אלינו."
 
     response = await chatbot.ainvoke(
         {"user_input": user_input},
         config={"configurable": {"session_id": session_id}, "temperature": 0.5, "top_p": 0.7},
     )
-    #safe_response = escape_special_chars(response.content)
-    if response is None or response.content is None:
-        return ""
-    return response.content
+    
+    # Add the user message and response to the history
+    if response is not None and response.content is not None:
+        from langchain_core.messages import HumanMessage, AIMessage
+        history = session_storage.get(session_id)
+        if history:
+            history.add_messages([
+                HumanMessage(content=user_input),
+                AIMessage(content=response.content)
+            ])
+        return response.content
+    return ""
 
 class InMemoryHistory(BaseChatMessageHistory, BaseModel):
     """Class to store chat history for each session."""
@@ -215,6 +225,19 @@ class InMemoryHistory(BaseChatMessageHistory, BaseModel):
 
     def add_messages(self, messages: List[BaseMessage]) -> None:
         self.messages.extend(messages)
+
+    def get_messages(self) -> List[BaseMessage]:
+        return self.messages
+    
+    def get_messages_as_json(self) -> str:
+        """Returns the chat history as a JSON string."""
+        serialized = []
+        for msg in self.messages:
+            serialized.append({
+                "type": msg.type,
+                "content": msg.content
+            })
+        return json.dumps(serialized, ensure_ascii=False, indent=4)
 
     def clear(self) -> None:
         self.messages = []
