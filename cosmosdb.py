@@ -15,19 +15,21 @@ def messages_to_json(messages):
     serialized = []
     for msg in messages:
         try:
-            # Handle both BaseMessage objects and dicts
-            if isinstance(msg, dict):
-                serialized.append(msg)
-            else:
-                # It's a BaseMessage object
-                serialized.append({
-                    "type": str(msg.type) if hasattr(msg, 'type') else "unknown",
-                    "content": str(msg.content) if hasattr(msg, 'content') else "",
-                    "additional_kwargs": dict(msg.additional_kwargs) if hasattr(msg, 'additional_kwargs') else {}
-                })
+            msg_dict = {
+                "type": str(msg.type) if hasattr(msg, 'type') else "unknown",
+                "content": str(msg.content) if hasattr(msg, 'content') else "",
+            }
+            serialized.append(msg_dict)
         except Exception as e:
             print(f"⚠️  Error serializing message: {str(e)}")
             serialized.append({"type": "error", "content": str(msg)})
+    
+    # Ensure the entire list is JSON serializable before returning
+    try:
+        json.dumps(serialized)
+    except Exception as e:
+        print(f"❌ Serialized messages are not JSON compatible: {e}")
+        return [{"type": "error", "content": "Failed to serialize messages"}]
     
     return serialized
 
