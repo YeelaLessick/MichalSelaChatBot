@@ -93,13 +93,14 @@ def setup_chatbot():
     )
 
     # add a test message to the cosmos db to verify connection
+    print("Testing Cosmos DB connection by sending a test message...")
     send_convessation_to_cosmos("test_session", [{"type": "system", "content": "Test message to verify Cosmos DB connection."}])
 
     # Function to handle per-user session history
-    #def get_history(session_id):
-    #    if session_id not in session_storage:
-    #        session_storage[session_id] = InMemoryHistory()
-    #    return session_storage[session_id]
+    def get_history(session_id):
+        if session_id not in session_storage:
+            session_storage[session_id] = InMemoryHistory()
+        return session_storage[session_id]
 
     # Create chatbot with session-based history
     chatbot_chain = RunnableWithMessageHistory(
