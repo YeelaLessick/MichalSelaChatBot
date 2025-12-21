@@ -24,6 +24,7 @@ def send_convessation_to_cosmos(session_id, messages):
         "SessionId": session_id,
         "Conversation": messages
     }
+    print(f"Storing conversation for session {session_id} to Cosmos DB, item: {item}")
     container.upsert_item(item)
 
 # check if the convestaion end message was sent
