@@ -21,6 +21,7 @@ def send_convessation_to_cosmos(session_id, messages):
     if container is None:
         raise Exception("Cosmos DB container is not connected.")
     item = {
+        "id": session_id,
         "SessionId": session_id,
         "Conversation": messages
     }
