@@ -219,6 +219,10 @@ class InMemoryHistory(BaseChatMessageHistory, BaseModel):
     """Class to store chat history for each session."""
     messages: List[BaseMessage] = Field(default_factory=list)
 
+    def add_messages(self, messages: List[BaseMessage]) -> None:
+        """Override to prevent default behavior that would duplicate messages."""
+        pass
+
     def add_user_message(self, message: str) -> None:
         """Add a user message - called by RunnableWithMessageHistory."""
         from langchain_core.messages import HumanMessage
