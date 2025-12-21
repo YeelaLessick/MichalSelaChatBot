@@ -211,15 +211,7 @@ async def chat(session_id, user_input):
         config={"configurable": {"session_id": session_id}, "temperature": 0.5, "top_p": 0.7},
     )
     
-    # Add the user message and response to the history
     if response is not None and response.content is not None:
-        from langchain_core.messages import HumanMessage, AIMessage
-        history = session_storage.get(session_id)
-        if history:
-            history.add_messages([
-                HumanMessage(content=user_input),
-                AIMessage(content=response.content)
-            ])
         return response.content
     return ""
 
