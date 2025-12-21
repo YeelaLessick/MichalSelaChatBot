@@ -7,6 +7,17 @@ encryption_key = Fernet.generate_key()  # TODO: Placeholder; in production use a
 cipher = Fernet(encryption_key)
 container = None
 
+def messages_to_json(messages):
+    """Convert list of BaseMessage objects to JSON-serializable list."""
+    serialized = []
+    for msg in messages:
+        serialized.append({
+            "type": msg.type,
+            "content": msg.content,
+            "additional_kwargs": msg.additional_kwargs if hasattr(msg, 'additional_kwargs') else {}
+        })
+    return serialized
+
 def connect_to_cosmos(connection_string, database_name, container_name):
     if connection_string is None or database_name is None or container_name is None:
         raise ValueError("Cosmos DB connection parameters must be provided.")
@@ -20,13 +31,17 @@ def send_convessation_to_cosmos(session_id, messages):
     global container
     if container is None:
         raise Exception("Cosmos DB container is not connected.")
-    item = {
-        "id": session_id,
-        "SessionId": session_id,
-        "Conversation": messages
-    }
-    print(f"Storing conversation for session {session_id} to Cosmos DB, item: {item}")
-    container.upsert_item(item)
+    try:
+        item = {
+            "id": session_id,
+            "SessionId": session_id,
+            "Conversation": messages_to_json(messages)
+        }
+        print(f"Storing conversation for session {session_id} to Cosmos DB")
+        container.upsert_item(item)
+        print(f"✅ Conversation stored successfully for session {session_id}")
+    except Exception as e:
+        print(f"❌ Error storing conversation to Cosmos DB: {str(e)}")
 
 # check if the convestaion end message was sent
 def is_end_conversation_message(last_message):
