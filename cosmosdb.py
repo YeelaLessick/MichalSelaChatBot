@@ -9,13 +9,26 @@ container = None
 
 def messages_to_json(messages):
     """Convert list of BaseMessage objects to JSON-serializable list."""
+    if not messages:
+        return []
+    
     serialized = []
     for msg in messages:
-        serialized.append({
-            "type": msg.type,
-            "content": msg.content,
-            "additional_kwargs": msg.additional_kwargs if hasattr(msg, 'additional_kwargs') else {}
-        })
+        try:
+            # Handle both BaseMessage objects and dicts
+            if isinstance(msg, dict):
+                serialized.append(msg)
+            else:
+                # It's a BaseMessage object
+                serialized.append({
+                    "type": str(msg.type) if hasattr(msg, 'type') else "unknown",
+                    "content": str(msg.content) if hasattr(msg, 'content') else "",
+                    "additional_kwargs": dict(msg.additional_kwargs) if hasattr(msg, 'additional_kwargs') else {}
+                })
+        except Exception as e:
+            print(f"⚠️  Error serializing message: {str(e)}")
+            serialized.append({"type": "error", "content": str(msg)})
+    
     return serialized
 
 def connect_to_cosmos(connection_string, database_name, container_name):
