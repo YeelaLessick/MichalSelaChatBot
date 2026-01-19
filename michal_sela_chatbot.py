@@ -14,6 +14,7 @@ from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_openai import AzureChatOpenAI
 import re
 import asyncio
+from cosmosdb import is_end_conversation_message, send_convessation_to_cosmos, connect_to_cosmos
 
 # Global storage for chatbot instance
 session_storage = {}
@@ -30,6 +31,9 @@ def setup_chatbot():
         "endpoint": os.getenv("AZURE_OPENAI_ENDPOINT"),
         "deployment_name": os.getenv("DEPLOYMENT_NAME"),
         "api_version": os.getenv("AZURE_OPENAI_API_VERSION"),
+        "connection_string": os.getenv("COSMOSDB_CONNECTIONS_STRING"),
+        "database_name": os.getenv("COSMOSDB_DATABASE"),
+        "container_name": os.getenv("COSMOSDB_CONTAINER"),
     }
 
     # Load data for examples and communication centers
@@ -82,6 +86,16 @@ def setup_chatbot():
 
     chain = prompt | llm
 
+    connect_to_cosmos(
+        env_vars["connection_string"],
+        env_vars["database_name"],
+        env_vars["container_name"],
+    )
+
+    # add a test message to the cosmos db to verify connection
+    print("Testing Cosmos DB connection by sending a test message...")
+    send_convessation_to_cosmos("test_session", [{"type": "system", "content": "Test message to verify Cosmos DB connection."}])
+
     # Function to handle per-user session history
     def get_history(session_id):
         if session_id not in session_storage:
@@ -104,16 +118,6 @@ def get_chatbot():
         raise RuntimeError("❌ Chatbot not initialized. Call setup_chatbot() first.")
     return chatbot_chain
 
-def load_env_variables():
-    load_dotenv(override=True)
-    return {
-        "key": os.getenv("AZURE_OPENAI_API_KEY"),
-        "endpoint": os.getenv("AZURE_OPENAI_ENDPOINT"),
-        "deployment_name": os.getenv("DEPLOYMENT_NAME"),
-        "api_version": os.getenv("AZURE_OPENAI_API_VERSION"),
-    }
-
-
 def get_data_from_blob():
     connection_string = "DefaultEndpointsProtocol=https;AccountName=samichalselaprod01;AccountKey=ThgCKgZT5h61GMq/OPqADv/R7B1oe8ODprIR0MSInTHL/toAUWC6j+fvk38ZzCiEVhgsGESXsKKk+AStOlwjxw==;EndpointSuffix=core.windows.net"
     blob_service_client = BlobServiceClient.from_connection_string(connection_string)
@@ -130,7 +134,6 @@ def get_data_from_blob():
     loader = PyPDFLoader(download_path)
     documents = loader.load()
     return " ".join([doc.page_content for doc in documents])
-
 
 def excel_to_json(sheet):
     df = pd.read_excel("./michalseladata.xlsx", sheet_name=sheet)
@@ -194,6 +197,16 @@ async def chat(session_id, user_input):
     """Handles a chat request using the session-specific chatbot."""
     try:
         chatbot = get_chatbot()
+
+        if user_input is None:
+            user_input = ""
+
+        if is_end_conversation_message(user_input):
+            history = session_storage.get(session_id)
+            if history:
+                send_convessation_to_cosmos(session_id, history.messages)
+            return "השיחה הסתיימה. תודה שפנית אלינו."
+
         response = await chatbot.ainvoke(
             {"user_input": user_input},
             config={"configurable": {"session_id": session_id}, "temperature": 0.5, "top_p": 0.7},
@@ -217,7 +230,31 @@ class InMemoryHistory(BaseChatMessageHistory, BaseModel):
     messages: List[BaseMessage] = Field(default_factory=list)
 
     def add_messages(self, messages: List[BaseMessage]) -> None:
-        self.messages.extend(messages)
+        """Override to prevent default behavior that would duplicate messages."""
+        pass
+
+    def add_user_message(self, message: str) -> None:
+        """Add a user message - called by RunnableWithMessageHistory."""
+        from langchain_core.messages import HumanMessage
+        self.messages.append(HumanMessage(content=message))
+
+    def add_ai_message(self, message: str) -> None:
+        """Add an AI message - called by RunnableWithMessageHistory."""
+        from langchain_core.messages import AIMessage
+        self.messages.append(AIMessage(content=message))
+
+    def get_messages(self) -> List[BaseMessage]:
+        return self.messages
+    
+    def get_messages_as_json(self) -> str:
+        """Returns the chat history as a JSON string."""
+        serialized = []
+        for msg in self.messages:
+            serialized.append({
+                "type": msg.type,
+                "content": msg.content
+            })
+        return json.dumps(serialized, ensure_ascii=False, indent=4)
 
     def clear(self) -> None:
         self.messages = []
