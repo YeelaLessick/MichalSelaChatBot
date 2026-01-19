@@ -30,11 +30,6 @@ class BotFrameworkHandler:
             
             print(f"🤖 Bot Framework message received from session {session_id}: {user_message}")
             
-            # check for None user_message
-            if user_message is None:
-                # skip processing and keep listening
-                return
-                            
             # Process the message through the chatbot
             chatbot_response = await chat(session_id, user_message)
             
