@@ -15,16 +15,8 @@ from langchain_openai import AzureChatOpenAI
 import re
 import asyncio
 from cosmosdb import is_end_conversation_message, send_convessation_to_cosmos, connect_to_cosmos
-from datetime import datetime, timedelta
-import logging
-import traceback
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Global storage for chatbot instance and session metadata
-# session_storage structure: session_id -> {"history": InMemoryHistory, "last_modified": datetime, "created_at": datetime}
+# Global storage for chatbot instance
 session_storage = {}
 chatbot_chain = None  # Will be initialized once
 
@@ -94,23 +86,21 @@ def setup_chatbot():
 
     chain = prompt | llm
 
-    # Function to handle per-user session history with metadata tracking
+    connect_to_cosmos(
+        env_vars["connection_string"],
+        env_vars["database_name"],
+        env_vars["container_name"],
+    )
+
+    # add a test message to the cosmos db to verify connection
+    print("Testing Cosmos DB connection by sending a test message...")
+    send_convessation_to_cosmos("test_session", [{"type": "system", "content": "Test message to verify Cosmos DB connection."}])
+
+    # Function to handle per-user session history
     def get_history(session_id):
-        current_time = datetime.now()
-        
         if session_id not in session_storage:
-            # Create new session with metadata
-            session_storage[session_id] = {
-                "history": InMemoryHistory(),
-                "created_at": current_time,
-                "last_modified": current_time
-            }
-            logger.info(f"📝 New session created: {session_id}")
-        else:
-            # Update last_modified timestamp on access
-            session_storage[session_id]["last_modified"] = current_time
-        
-        return session_storage[session_id]["history"]
+            session_storage[session_id] = InMemoryHistory()
+        return session_storage[session_id]
 
     # Create chatbot with session-based history
     chatbot_chain = RunnableWithMessageHistory(
@@ -222,21 +212,17 @@ async def chat(session_id, user_input):
             config={"configurable": {"session_id": session_id}, "temperature": 0.5, "top_p": 0.7},
         )
         
-        # Update last_modified timestamp after successful chat
-        if session_id in session_storage:
-            session_storage[session_id]["last_modified"] = datetime.now()
-        
         # Validate response content exists
         if response is None or not hasattr(response, 'content') or response.content is None:
-            logger.warning(f"⚠️ Warning: Empty response from chatbot for session {session_id}")
+            print(f"⚠️ Warning: Empty response from chatbot for session {session_id}")
             return "משהו השתבש, אנא נסי שוב 💜"
         
         #safe_response = escape_special_chars(response.content)
         return response.content
         
     except Exception as e:
-        logger.error(f"❌ Error in chat function for session {session_id}: {e}")
-        logger.error(traceback.format_exc())
+        print(f"❌ Error in chat function for session {session_id}: {e}")
+        print(traceback.format_exc())
         return "משהו השתבש, אנא נסי שוב 💜"
 
 class InMemoryHistory(BaseChatMessageHistory, BaseModel):
