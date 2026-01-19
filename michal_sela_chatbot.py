@@ -12,9 +12,9 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_openai import AzureChatOpenAI
-import re
 import asyncio
-from cosmosdb import is_end_conversation_message, send_convessation_to_cosmos, connect_to_cosmos
+from cosmosdb import is_end_conversation_message, send_convessation_to_cosmos, send_extracted_data, connect_to_cosmos
+from extraction_agent import extract_with_retry
 
 # Global storage for chatbot instance
 session_storage = {}
@@ -202,8 +202,13 @@ async def chat(session_id, user_input):
 
     if is_end_conversation_message(user_input):
         history = session_storage.get(session_id)
-        if history:
-            send_convessation_to_cosmos(session_id, history.messages)
+        if history and len(history.messages) > 0:
+            # Create background task for extraction and saving
+            # Don't await - let it run asynchronously
+            asyncio.create_task(process_conversation_end(session_id, history.messages))
+            print(f"🚀 Started background extraction task for session {session_id}")
+        
+        # Immediately return response to user
         return "השיחה הסתיימה. תודה שפנית אלינו."
 
     response = await chatbot.ainvoke(
@@ -214,6 +219,46 @@ async def chat(session_id, user_input):
     if response is not None and response.content is not None:
         return response.content
     return ""
+
+
+async def process_conversation_end(session_id: str, messages: List[BaseMessage]):
+    """
+    Background task to extract insights and save conversation to Cosmos DB.
+    Runs asynchronously without blocking the user response.
+    """
+    try:
+        print(f"📊 Starting extraction for session {session_id} ({len(messages)} messages)")
+        
+        # Save conversation first
+        send_convessation_to_cosmos(session_id, messages)
+        
+        # Extract insights with retry logic
+        extraction_data = await extract_with_retry(session_id, messages, max_retries=3)
+        
+        # Save extraction data separately
+        send_extracted_data(session_id, extraction_data)
+        
+        # Cleanup session from memory
+        if session_id in session_storage:
+            del session_storage[session_id]
+            print(f"🧹 Cleaned up session {session_id} from memory")
+        
+        print(f"✅ Background processing complete for session {session_id}")
+        
+    except Exception as e:
+        print(f"❌ Error in background conversation processing for session {session_id}: {str(e)}")
+        # Even if extraction fails, try to save the raw conversation
+        try:
+            send_convessation_to_cosmos(session_id, messages)
+            print(f"⚠️  Saved conversation without extraction data for session {session_id}")
+        except Exception as save_error:
+            print(f"❌ Failed to save conversation for session {session_id}: {str(save_error)}")
+            print(f"⚠️  Saved conversation without extraction data for session {session_id}")
+        except Exception as save_error:
+            print(f"❌ Failed to save conversation for session {session_id}: {str(save_error)}")
+
+
+
 
 class InMemoryHistory(BaseChatMessageHistory, BaseModel):
     """Class to store chat history for each session."""

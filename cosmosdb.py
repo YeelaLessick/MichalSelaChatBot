@@ -50,13 +50,36 @@ def send_convessation_to_cosmos(session_id, messages):
     try:
         item = {
             "id": session_id,
-            "SessionId": session_id,
             "Conversation": messages_to_json(messages)
         }
         container.upsert_item(item)
         print(f"✅ Conversation stored successfully for session {session_id}")
     except Exception as e:
         print(f"❌ Error storing conversation to Cosmos DB: {str(e)}")
+
+# send extracted data to cosmos db
+def send_extracted_data(session_id, extraction_data):
+    global container
+    if container is None:
+        raise Exception("Cosmos DB container is not connected.")
+    try:
+        from datetime import datetime
+        
+        # Build extraction item
+        item = {
+            "id": f"{session_id}_extraction",
+            "Extraction": extraction_data,
+            "Metadata": {
+                "extraction_timestamp": datetime.utcnow().isoformat(),
+                "channel": "whatsapp" if "whatsapp_" in session_id else "bot_framework",
+                "original_session_id": session_id
+            }
+        }
+        
+        container.upsert_item(item)
+        print(f"✅ Extraction data stored successfully for session {session_id}")
+    except Exception as e:
+        print(f"❌ Error storing extraction data to Cosmos DB: {str(e)}")
 
 # check if the convestaion end message was sent
 def is_end_conversation_message(last_message):

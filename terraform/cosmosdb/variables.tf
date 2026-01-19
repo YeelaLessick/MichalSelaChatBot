@@ -3,6 +3,18 @@ variable "cosmosdb_name" {
   type        = string
 }
 
+variable "database_name" {
+  description = "Name of the Cosmos DB SQL database"
+  type        = string
+  default     = "chatbot"
+}
+
+variable "container_name" {
+  description = "Name of the Cosmos DB SQL container"
+  type        = string
+  default     = "conversations"
+}
+
 variable "location" {
   description = "Azure region where resources will be created"
   type        = string
