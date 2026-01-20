@@ -183,16 +183,6 @@ def format_examples_and_communication(examples_text, communication_text):
 
     return formatted_examples, formatted_communication
 
-# def escape_special_chars(text: str) -> str:
-#     """
-#     Escapes all characters that are reserved in Telegram MarkdownV2.
-#     """
-#     if not text:
-#         return text
-
-#     escape_chars = r'_*\[\]()~`>#+-=|{}.!'
-#     return re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', text)
-
 async def chat(session_id, user_input):
     """Handles a chat request using the session-specific chatbot."""
     chatbot = get_chatbot()
@@ -205,8 +195,8 @@ async def chat(session_id, user_input):
         if history and len(history.messages) > 0:
             # Create background task for extraction and saving
             # Don't await - let it run asynchronously
-            asyncio.create_task(process_conversation_end(session_id, history.messages))
             print(f"🚀 Started background extraction task for session {session_id}")
+            asyncio.create_task(process_conversation_end(session_id, history.messages))
         
         # Immediately return response to user
         return "השיחה הסתיימה. תודה שפנית אלינו."
@@ -226,9 +216,7 @@ async def process_conversation_end(session_id: str, messages: List[BaseMessage])
     Background task to extract insights and save conversation to Cosmos DB.
     Runs asynchronously without blocking the user response.
     """
-    try:
-        print(f"📊 Starting extraction for session {session_id} ({len(messages)} messages)")
-        
+    try:        
         # Save conversation first
         send_convessation_to_cosmos(session_id, messages)
         
