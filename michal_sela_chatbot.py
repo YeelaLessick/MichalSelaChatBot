@@ -32,8 +32,10 @@ def setup_chatbot():
         "deployment_name": os.getenv("DEPLOYMENT_NAME"),
         "api_version": os.getenv("AZURE_OPENAI_API_VERSION"),
         "connection_string": os.getenv("COSMOSDB_CONNECTIONS_STRING"),
-        "database_name": os.getenv("COSMOSDB_DATABASE"),
-        "container_name": os.getenv("COSMOSDB_CONTAINER"),
+        "conversations_database_name": os.getenv("COSMOSDB_CONV_DATABASE"),
+        "conversations_container_name": os.getenv("COSMOSDB_CONV_CONTAINER"),
+        "extracted_data_database_name": os.getenv("COSMOSDB_EXT_DATABASE"),
+        "extracted_data_container_name": os.getenv("COSMOSDB_EXT_CONTAINER"),
     }
 
     # Load data for examples and communication centers
@@ -192,6 +194,7 @@ async def chat(session_id, user_input):
 
     if is_end_conversation_message(user_input):
         history = session_storage.get(session_id)
+        print(f"conversation end detected for session {session_id}")
         if history and len(history.messages) > 0:
             # Create background task for extraction and saving
             # Don't await - let it run asynchronously
