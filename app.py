@@ -6,10 +6,12 @@ import asyncio
 import threading
 import traceback
 import os
-from michal_sela_chatbot import setup_chatbot
+import time
+from michal_sela_chatbot import setup_chatbot, session_storage
 from bot_framework_handler import handle_bot_framework_message
 from whatsapp_handler import handle_whatsapp_webhook, handle_whatsapp_options
 from config import DefaultConfig
+from session_manager import cleanup_expired_sessions, get_active_session_count
 
 print("Starting app")
 
@@ -25,6 +27,39 @@ adapter = CloudAdapter(ConfigurationBotFrameworkAuthentication(CONFIG))
 
 # Initialize chatbot
 setup_chatbot()
+
+# Background job for session cleanup
+def session_cleanup_job():
+    """Background job that runs periodically to clean up expired sessions."""
+    print(f"🧹 Session cleanup job started (runs every {CONFIG.SESSION_CLEANUP_INTERVAL_MINUTES} minutes, timeout: {CONFIG.SESSION_TIMEOUT_MINUTES} minutes)")
+    
+    while True:
+        try:
+            # Wait for the configured interval
+            time.sleep(CONFIG.SESSION_CLEANUP_INTERVAL_MINUTES * 60)
+            
+            # Get stats before cleanup
+            sessions_before = get_active_session_count(session_storage)
+            
+            # Run cleanup
+            print(f"🧹 Session cleanup started: checking {sessions_before} sessions")
+            cleaned_count = cleanup_expired_sessions(session_storage, CONFIG.SESSION_TIMEOUT_MINUTES)
+            
+            # Get stats after cleanup
+            sessions_after = get_active_session_count(session_storage)
+            
+            if cleaned_count > 0:
+                print(f"✅ Session cleanup completed: {cleaned_count} sessions removed, {sessions_after} active sessions remaining")
+            else:
+                print(f"✅ Session cleanup completed: No expired sessions found, {sessions_after} active sessions")
+                
+        except Exception as e:
+            print(f"❌ Error in session cleanup job: {e}")
+            print(traceback.format_exc())
+
+# Start session cleanup background job as daemon thread
+cleanup_thread = threading.Thread(target=session_cleanup_job, daemon=True)
+cleanup_thread.start()
 
 @app.route('/')
 def index():
