@@ -19,10 +19,12 @@ from extraction_agent import extract_with_retry
 # Global storage for chatbot instance
 session_storage = {}
 chatbot_chain = None  # Will be initialized once
+conv_container = None
+ext_container = None
 
 def setup_chatbot():
     """Initializes chatbot components once at startup."""
-    global chatbot_chain
+    global chatbot_chain, conv_container, ext_container
 
     # Load environment variables
     load_dotenv(override=True)
@@ -88,10 +90,16 @@ def setup_chatbot():
 
     chain = prompt | llm
 
-    connect_to_cosmos(
+    conv_container = connect_to_cosmos(
         env_vars["connection_string"],
-        env_vars["database_name"],
-        env_vars["container_name"],
+        env_vars["conversations_database_name"],
+        env_vars["conversations_container_name"],
+    )
+
+    ext_container = connect_to_cosmos(
+        env_vars["connection_string"],
+        env_vars["extracted_data_database_name"],
+        env_vars["extracted_data_container_name"],
     )
 
     # add a test message to the cosmos db to verify connection
@@ -199,7 +207,7 @@ async def chat(session_id, user_input):
             # Create background task for extraction and saving
             # Don't await - let it run asynchronously
             print(f"🚀 Started background extraction task for session {session_id}")
-            asyncio.create_task(process_conversation_end(session_id, history.messages))
+            asyncio.create_task(process_conversation_end(conv_container, ext_container, session_id, history.messages))
         
         # Immediately return response to user
         return "השיחה הסתיימה. תודה שפנית אלינו."
@@ -214,20 +222,20 @@ async def chat(session_id, user_input):
     return ""
 
 
-async def process_conversation_end(session_id: str, messages: List[BaseMessage]):
+async def process_conversation_end(conv_container, ext_container, session_id: str, messages: List[BaseMessage]):
     """
     Background task to extract insights and save conversation to Cosmos DB.
     Runs asynchronously without blocking the user response.
     """
     try:        
         # Save conversation first
-        send_convessation_to_cosmos(session_id, messages)
+        send_convessation_to_cosmos(conv_container, session_id, messages)
         
         # Extract insights with retry logic
         extraction_data = await extract_with_retry(session_id, messages, max_retries=3)
         
         # Save extraction data separately
-        send_extracted_data(session_id, extraction_data)
+        send_extracted_data(ext_container, session_id, extraction_data)
         
         # Cleanup session from memory
         if session_id in session_storage:
@@ -240,7 +248,7 @@ async def process_conversation_end(session_id: str, messages: List[BaseMessage])
         print(f"❌ Error in background conversation processing for session {session_id}: {str(e)}")
         # Even if extraction fails, try to save the raw conversation
         try:
-            send_convessation_to_cosmos(session_id, messages)
+            send_convessation_to_cosmos(conv_container, session_id, messages)
             print(f"⚠️  Saved conversation without extraction data for session {session_id}")
         except Exception as save_error:
             print(f"❌ Failed to save conversation for session {session_id}: {str(save_error)}")

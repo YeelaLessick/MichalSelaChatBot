@@ -150,7 +150,7 @@ async def extract_with_retry(session_id: str, messages: List[BaseMessage], max_r
                 return result
             else:
                 last_error = result.get("extraction_error")
-                print(f"⚠️  Extraction returned error on attempt {attempt + 1}: {last_error}")
+                print(f"⚠️ Extraction returned error on attempt {attempt + 1}: {last_error}")
                 
         except Exception as e:
             last_error = str(e)
