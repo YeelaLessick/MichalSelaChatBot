@@ -202,7 +202,7 @@ async def chat(session_id, user_input):
 
     if is_end_conversation_message(user_input):
         history = session_storage.get(session_id)
-        print(f"conversation end detected for session {session_id}")
+        print(f"conversation end detected for session {session_id}, messages count: {len(history.messages) if history else 0}")
         if history and len(history.messages) > 0:
             # Create background task for extraction and saving
             # Don't await - let it run asynchronously
