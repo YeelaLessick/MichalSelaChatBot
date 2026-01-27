@@ -232,6 +232,8 @@ async def process_conversation_end(conv_container, ext_container, session_id: st
         # Extract insights with retry logic
         extraction_data = await extract_with_retry(session_id, messages, max_retries=3)
         
+        print(f"✅ Extraction data obtained for session {session_id}: {extraction_data}")
+        
         # Save extraction data separately
         send_extracted_data(ext_container, session_id, extraction_data)
         
