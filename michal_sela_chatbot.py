@@ -264,18 +264,8 @@ class InMemoryHistory(BaseChatMessageHistory, BaseModel):
     messages: List[BaseMessage] = Field(default_factory=list)
 
     def add_messages(self, messages: List[BaseMessage]) -> None:
-        """Override to prevent default behavior that would duplicate messages."""
-        pass
-
-    def add_user_message(self, message: str) -> None:
-        """Add a user message - called by RunnableWithMessageHistory."""
-        from langchain_core.messages import HumanMessage
-        self.messages.append(HumanMessage(content=message))
-
-    def add_ai_message(self, message: str) -> None:
-        """Add an AI message - called by RunnableWithMessageHistory."""
-        from langchain_core.messages import AIMessage
-        self.messages.append(AIMessage(content=message))
+        """Add messages to the store."""
+        self.messages.extend(messages)
 
     def get_messages(self) -> List[BaseMessage]:
         return self.messages
