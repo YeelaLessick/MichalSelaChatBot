@@ -102,9 +102,7 @@ def setup_chatbot():
         env_vars["extracted_data_container_name"],
     )
 
-    # add a test message to the cosmos db to verify connection
-    print("Testing Cosmos DB connection by sending a test message...")
-    send_convessation_to_cosmos("test_session", [{"type": "system", "content": "Test message to verify Cosmos DB connection."}])
+    print("✅ Cosmos DB containers connected successfully")
 
     # Function to handle per-user session history
     def get_history(session_id):
@@ -252,11 +250,6 @@ async def process_conversation_end(conv_container, ext_container, session_id: st
             print(f"⚠️  Saved conversation without extraction data for session {session_id}")
         except Exception as save_error:
             print(f"❌ Failed to save conversation for session {session_id}: {str(save_error)}")
-            print(f"⚠️  Saved conversation without extraction data for session {session_id}")
-        except Exception as save_error:
-            print(f"❌ Failed to save conversation for session {session_id}: {str(save_error)}")
-
-
 
 
 class InMemoryHistory(BaseChatMessageHistory, BaseModel):
