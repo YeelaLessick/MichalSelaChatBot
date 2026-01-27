@@ -22,7 +22,5 @@ class DefaultConfig:
     APP_TENANTID = os.environ.get("MicrosoftAppTenantId", "")
     
     # Session cleanup configuration
-    # For testing: cleanup job runs every 2 minutes, sessions expire after 5 minutes of inactivity
-    # For production: set SESSION_CLEANUP_INTERVAL_MINUTES=30 and SESSION_TIMEOUT_MINUTES=60 in environment
-    SESSION_CLEANUP_INTERVAL_MINUTES = int(os.environ.get("SESSION_CLEANUP_INTERVAL_MINUTES", "2"))
-    SESSION_TIMEOUT_MINUTES = int(os.environ.get("SESSION_TIMEOUT_MINUTES", "5"))
+    SESSION_CLEANUP_INTERVAL_MINUTES = int(os.environ.get("SESSION_CLEANUP_INTERVAL_MINUTES", "30"))
+    SESSION_TIMEOUT_MINUTES = int(os.environ.get("SESSION_TIMEOUT_MINUTES", "60"))

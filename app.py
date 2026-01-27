@@ -7,11 +7,28 @@ import threading
 import traceback
 import os
 import time
+import logging
 from michal_sela_chatbot import setup_chatbot, session_storage
 from bot_framework_handler import handle_bot_framework_message
 from whatsapp_handler import handle_whatsapp_webhook, handle_whatsapp_options
 from config import DefaultConfig
 from session_manager import cleanup_expired_sessions, get_active_session_count
+
+# Configure logging - suppress verbose Azure SDK logs
+logging.basicConfig(
+    level=logging.WARNING,  # Only show WARNING and above for libraries
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+# Set specific loggers to WARNING to reduce noise
+logging.getLogger('azure').setLevel(logging.WARNING)
+logging.getLogger('azure.core.pipeline.policies.http_logging_policy').setLevel(logging.WARNING)
+logging.getLogger('httpx').setLevel(logging.WARNING)
+logging.getLogger('openai').setLevel(logging.WARNING)
+
+# Keep our app loggers at INFO level
+logging.getLogger('michal_sela_chatbot').setLevel(logging.INFO)
+logging.getLogger('session_manager').setLevel(logging.INFO)
 
 print("Starting app")
 
