@@ -50,7 +50,8 @@ def send_convessation_to_cosmos(container, session_id, messages):
             "id": session_id,
             "Conversation": messages_to_json(messages)
         }
-        container.upsert_item(item)
+        # Explicitly pass partition key
+        container.upsert_item(body=item, partition_key=session_id)
         print(f"✅ Conversation stored successfully for session {session_id}")
     except Exception as e:
         print(f"❌ Error storing conversation to Cosmos DB: {str(e)}")
@@ -73,7 +74,8 @@ def send_extracted_data(container, session_id, extraction_data):
             }
         }
         
-        container.upsert_item(item)
+        # Explicitly pass partition key
+        container.upsert_item(body=item, partition_key=f"{session_id}")
         print(f"✅ Extraction data stored successfully for session {session_id}")
     except Exception as e:
         print(f"❌ Error storing extraction data to Cosmos DB: {str(e)}")
