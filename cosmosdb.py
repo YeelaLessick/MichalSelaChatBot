@@ -48,6 +48,7 @@ def send_convessation_to_cosmos(container, session_id, messages):
     try:
         item = {
             "id": session_id,
+            "SessionId": session_id,  # Add partition key field explicitly
             "Conversation": messages_to_json(messages)
         }
         # Explicitly pass partition key
