@@ -67,20 +67,25 @@ async def extract_conversation_insights(session_id: str, messages: List[BaseMess
             ("human", "שיחה:\n{conversation}")
         ])
         
-        # Initialize Azure OpenAI
+        # Initialize Azure OpenAI with timeout
         llm = AzureChatOpenAI(
             api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
             azure_deployment=os.getenv("DEPLOYMENT_NAME"),
-            temperature=0.1  # Lower temperature for more consistent extraction
+            temperature=0.1,  # Lower temperature for more consistent extraction
+            request_timeout=60  # 60 second timeout
         )
         
         chain = extraction_prompt | llm
         
-        # Execute extraction
-        result = await chain.ainvoke({"conversation": conversation_text})
+        # Execute extraction with timeout
+        print(f"📞 Calling Azure OpenAI for extraction...")
+        result = await asyncio.wait_for(
+            chain.ainvoke({"conversation": conversation_text}),
+            timeout=90  # 90 second total timeout
+        )
         
         print (f"✅ Extraction completed for session {session_id}")
-        
+
         # Parse the JSON response from the LLM
         extracted_data = {}
         if hasattr(result, 'content') and result.content:
@@ -105,9 +110,20 @@ async def extract_conversation_insights(session_id: str, messages: List[BaseMess
             "message_count": len(messages),
             "extracted_fields": extracted_data
         }
+    
+    except asyncio.TimeoutError:
+        print(f"⏱️  Extraction timed out for session {session_id}")
+        return {
+            "session_id": session_id,
+            "extraction_timestamp": datetime.utcnow().isoformat(),
+            "message_count": len(messages) if messages else 0,
+            "extraction_error": "Extraction timed out after 90 seconds"
+        }
         
     except Exception as e:
         print(f"❌ Extraction failed for session {session_id}: {str(e)}")
+        import traceback
+        print(f"📋 Traceback: {traceback.format_exc()}")
         return {
             "session_id": session_id,
             "extraction_timestamp": datetime.utcnow().isoformat(),
