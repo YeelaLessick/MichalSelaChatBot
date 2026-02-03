@@ -27,16 +27,7 @@ FIELD_NAME_MAPPING = {
 
 
 async def extract_conversation_insights(session_id: str, messages: List[BaseMessage]) -> Dict[str, Any]:
-    """
-    Extract structured insights from conversation using Azure OpenAI.
-    
-    Args:
-        session_id: Unique session identifier
-        messages: List of conversation messages (BaseMessage objects)
-    
-    Returns:
-        Dict containing session_id, timestamp, and extracted data
-    """
+    print(f"🔍 Starting extraction for session {session_id} with {len(messages)} messages")
     try:
         # Convert messages to readable text format
         conversation_text = "\n".join([
@@ -47,7 +38,7 @@ async def extract_conversation_insights(session_id: str, messages: List[BaseMess
         
         # If no extraction fields configured, return basic metadata only
         if not EXTRACTION_FIELDS or len(EXTRACTION_FIELDS) == 0:
-            print(f"⚠️  No extraction fields configured, returning basic metadata only")
+            print(f"⚠️ No extraction fields configured, returning basic metadata only")
             return {
                 "session_id": session_id,
                 "extraction_timestamp": datetime.utcnow().isoformat(),
@@ -88,6 +79,8 @@ async def extract_conversation_insights(session_id: str, messages: List[BaseMess
         # Execute extraction
         result = await chain.ainvoke({"conversation": conversation_text})
         
+        print (f"✅ Extraction completed for session {session_id}")
+        
         # Parse the JSON response from the LLM
         extracted_data = {}
         if hasattr(result, 'content') and result.content:
@@ -124,17 +117,6 @@ async def extract_conversation_insights(session_id: str, messages: List[BaseMess
 
 
 async def extract_with_retry(session_id: str, messages: List[BaseMessage], max_retries: int = 3) -> Dict[str, Any]:
-    """
-    Extract conversation insights with retry logic.
-    
-    Args:
-        session_id: Unique session identifier
-        messages: List of conversation messages
-        max_retries: Maximum number of retry attempts (default: 3)
-    
-    Returns:
-        Dict containing extraction results or error information
-    """
     attempt = 0
     last_error = None
     
