@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 from typing import List
 import pandas as pd
 from azure.storage.blob import BlobServiceClient
@@ -202,12 +203,18 @@ async def chat(session_id, user_input):
         history = session_storage.get(session_id)
         print(f"conversation end detected for session {session_id}, messages count: {len(history.messages) if history else 0}")
         if history and len(history.messages) > 0:
-            # Create background task for extraction and saving
-            # Don't await - let it run asynchronously
-            print(f"🚀 Started background extraction task for session {session_id}")
-            asyncio.create_task(process_conversation_end(conv_container, ext_container, session_id, history.messages))
+            # Make a copy of messages before launching background thread,
+            # since session storage may be cleaned up.
+            messages_copy = list(history.messages)
+            print(f"🚀 Starting background extraction thread for session {session_id}")
+            thread = threading.Thread(
+                target=_run_background_extraction,
+                args=(conv_container, ext_container, session_id, messages_copy),
+                daemon=True
+            )
+            thread.start()
         
-        # Immediately return response to user
+        # Return response to user immediately
         return "השיחה הסתיימה. תודה שפנית אלינו."
 
     response = await chatbot.ainvoke(
@@ -220,10 +227,24 @@ async def chat(session_id, user_input):
     return ""
 
 
+def _run_background_extraction(conv_container, ext_container, session_id: str, messages: List[BaseMessage]):
+    """
+    Run extraction in a separate thread with its own event loop.
+    This avoids the issue where asyncio.create_task() tasks get cancelled
+    when the parent asyncio.run() (from the Flask request thread) finishes.
+    """
+    try:
+        asyncio.run(process_conversation_end(conv_container, ext_container, session_id, messages))
+    except Exception as e:
+        print(f"❌ Background extraction thread failed for session {session_id}: {str(e)}")
+        import traceback
+        print(f"📋 Traceback: {traceback.format_exc()}")
+
+
 async def process_conversation_end(conv_container, ext_container, session_id: str, messages: List[BaseMessage]):
     """
     Background task to extract insights and save conversation to Cosmos DB.
-    Runs asynchronously without blocking the user response.
+    Runs in its own thread/event loop without blocking the user response.
     """
     try:        
         # Save conversation first
