@@ -58,11 +58,11 @@ async def extract_conversation_insights(session_id: str, messages: List[BaseMess
 החזירי את התשובה בפורמט JSON בלבד, עם מפתח לכל שדה מהרשימה לעיל.
 אם שדה מסוים לא רלוונטי או לא נמצא בשיחה, השתמשי בערך null.
 דוגמה לפורמט:
-{{
+{{{{
     "שדה1": "ערך",
     "שדה2": null,
     "שדה3": "ערך אחר"
-}}
+}}}}
 """),
             ("human", "שיחה:\n{conversation}")
         ])
