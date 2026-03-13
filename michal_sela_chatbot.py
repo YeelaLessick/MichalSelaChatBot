@@ -14,9 +14,9 @@ from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_openai import AzureChatOpenAI
 import asyncio
-from cosmosdb import is_end_conversation_message, send_convessation_to_cosmos, send_extracted_data, connect_to_cosmos
+from cosmosdb import is_end_conversation_message, connect_to_cosmos
+from session_manager import persist_session_data
 from datetime import datetime, timedelta
-from extraction_agent import extract_with_retry
 
 import logging
 import traceback
@@ -233,21 +233,30 @@ async def chat(session_id, user_input):
             user_input = ""
 
         if is_end_conversation_message(user_input):
-            history = session_storage.get(session_id)
-            print(f"conversation end detected for session {session_id}, messages count: {len(history.messages) if history else 0}")
-            if history and len(history.messages) > 0:
-                # Make a copy of messages before launching background thread,
-                # since session storage may be cleaned up.
-                messages_copy = list(history.messages)
-                print(f"🚀 Starting background extraction thread for session {session_id}")
+            session_data = session_storage.get(session_id)
+            if session_data and len(session_data["history"].messages) > 0:
+                logger.info(f"Conversation end detected for session {session_id}, "
+                            f"messages: {len(session_data['history'].messages)}")
+                # Run persist_session_data in a background thread so we
+                # return a response to the user immediately.
                 thread = threading.Thread(
-                    target=_run_background_extraction,
-                    args=(conv_container, ext_container, session_id, messages_copy),
-                    daemon=True
+                    target=persist_session_data,
+                    args=(
+                        session_id,
+                        session_data["history"],
+                        {
+                            "created_at": session_data.get("created_at"),
+                            "last_modified": session_data.get("last_modified"),
+                        },
+                    ),
+                    kwargs={
+                        "conv_container": conv_container,
+                        "ext_container": ext_container,
+                    },
+                    daemon=True,
                 )
                 thread.start()
-        
-            # Return response to user immediately
+
             return "השיחה הסתיימה. תודה שפנית אלינו."
 
         response = await chatbot.ainvoke(

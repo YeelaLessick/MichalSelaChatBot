@@ -42,7 +42,7 @@ def connect_to_cosmos(connection_string, database_name, container_name):
     return container
 
 # send all the conversation messages to cosmos db as is, no encryption
-def send_convessation_to_cosmos(container, session_id, messages):
+def send_conversation_to_cosmos(container, session_id, messages):
     if container is None:
         raise Exception("Cosmos DB container is not connected.")
     try:
