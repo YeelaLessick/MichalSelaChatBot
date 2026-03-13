@@ -15,9 +15,18 @@ from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_openai import AzureChatOpenAI
 import asyncio
 from cosmosdb import is_end_conversation_message, send_convessation_to_cosmos, send_extracted_data, connect_to_cosmos
+from datetime import datetime, timedelta
 from extraction_agent import extract_with_retry
 
-# Global storage for chatbot instance
+import logging
+import traceback
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Global storage for chatbot instance and session metadata
+# session_storage structure: session_id -> {"history": InMemoryHistory, "last_modified": datetime, "created_at": datetime}
 session_storage = {}
 chatbot_chain = None  # Will be initialized once
 conv_container = None
@@ -105,11 +114,23 @@ def setup_chatbot():
 
     print("✅ Cosmos DB containers connected successfully")
 
-    # Function to handle per-user session history
+    # Function to handle per-user session history with metadata tracking
     def get_history(session_id):
+        current_time = datetime.now()
+        
         if session_id not in session_storage:
-            session_storage[session_id] = InMemoryHistory()
-        return session_storage[session_id]
+            # Create new session with metadata
+            session_storage[session_id] = {
+                "history": InMemoryHistory(),
+                "created_at": current_time,
+                "last_modified": current_time
+            }
+            logger.info(f"📝 New session created: {session_id}")
+        else:
+            # Update last_modified timestamp on access
+            session_storage[session_id]["last_modified"] = current_time
+        
+        return session_storage[session_id]["history"]
 
     # Create chatbot with session-based history
     chatbot_chain = RunnableWithMessageHistory(
@@ -127,6 +148,16 @@ def get_chatbot():
         raise RuntimeError("❌ Chatbot not initialized. Call setup_chatbot() first.")
     return chatbot_chain
 
+def load_env_variables():
+    load_dotenv(override=True)
+    return {
+        "key": os.getenv("AZURE_OPENAI_API_KEY"),
+        "endpoint": os.getenv("AZURE_OPENAI_ENDPOINT"),
+        "deployment_name": os.getenv("DEPLOYMENT_NAME"),
+        "api_version": os.getenv("AZURE_OPENAI_API_VERSION"),
+    }
+
+
 def get_data_from_blob():
     connection_string = "DefaultEndpointsProtocol=https;AccountName=samichalselaprod01;AccountKey=ThgCKgZT5h61GMq/OPqADv/R7B1oe8ODprIR0MSInTHL/toAUWC6j+fvk38ZzCiEVhgsGESXsKKk+AStOlwjxw==;EndpointSuffix=core.windows.net"
     blob_service_client = BlobServiceClient.from_connection_string(connection_string)
@@ -143,6 +174,7 @@ def get_data_from_blob():
     loader = PyPDFLoader(download_path)
     documents = loader.load()
     return " ".join([doc.page_content for doc in documents])
+
 
 def excel_to_json(sheet):
     df = pd.read_excel("./michalseladata.xlsx", sheet_name=sheet)
@@ -194,93 +226,57 @@ def format_examples_and_communication(examples_text, communication_text):
 
 async def chat(session_id, user_input):
     """Handles a chat request using the session-specific chatbot."""
-    chatbot = get_chatbot()
-
-    if user_input is None:
-        user_input = ""
-
-    if is_end_conversation_message(user_input):
-        history = session_storage.get(session_id)
-        print(f"conversation end detected for session {session_id}, messages count: {len(history.messages) if history else 0}")
-        if history and len(history.messages) > 0:
-            # Make a copy of messages before launching background thread,
-            # since session storage may be cleaned up.
-            messages_copy = list(history.messages)
-            print(f"🚀 Starting background extraction thread for session {session_id}")
-            thread = threading.Thread(
-                target=_run_background_extraction,
-                args=(conv_container, ext_container, session_id, messages_copy),
-                daemon=True
-            )
-            thread.start()
-        
-        # Return response to user immediately
-        return "השיחה הסתיימה. תודה שפנית אלינו."
-
-    response = await chatbot.ainvoke(
-        {"user_input": user_input},
-        config={"configurable": {"session_id": session_id}, "temperature": 0.5, "top_p": 0.7},
-    )
-    
-    if response is not None and response.content is not None:
-        return response.content
-    return ""
-
-
-def _run_background_extraction(conv_container, ext_container, session_id: str, messages: List[BaseMessage]):
-    """
-    Run extraction in a separate thread with its own event loop.
-    This avoids the issue where asyncio.create_task() tasks get cancelled
-    when the parent asyncio.run() (from the Flask request thread) finishes.
-    """
     try:
-        asyncio.run(process_conversation_end(conv_container, ext_container, session_id, messages))
-    except Exception as e:
-        print(f"❌ Background extraction thread failed for session {session_id}: {str(e)}")
-        import traceback
-        print(f"📋 Traceback: {traceback.format_exc()}")
+        chatbot = get_chatbot()
 
+        if user_input is None:
+            user_input = ""
 
-async def process_conversation_end(conv_container, ext_container, session_id: str, messages: List[BaseMessage]):
-    """
-    Background task to extract insights and save conversation to Cosmos DB.
-    Runs in its own thread/event loop without blocking the user response.
-    """
-    try:        
-        # Save conversation first
-        send_convessation_to_cosmos(conv_container, session_id, messages)
+        if is_end_conversation_message(user_input):
+            history = session_storage.get(session_id)
+            print(f"conversation end detected for session {session_id}, messages count: {len(history.messages) if history else 0}")
+            if history and len(history.messages) > 0:
+                # Make a copy of messages before launching background thread,
+                # since session storage may be cleaned up.
+                messages_copy = list(history.messages)
+                print(f"🚀 Starting background extraction thread for session {session_id}")
+                thread = threading.Thread(
+                    target=_run_background_extraction,
+                    args=(conv_container, ext_container, session_id, messages_copy),
+                    daemon=True
+                )
+                thread.start()
         
-        # Extract insights with retry logic
-        extraction_data = await extract_with_retry(session_id, messages, max_retries=3)
+            # Return response to user immediately
+            return "השיחה הסתיימה. תודה שפנית אלינו."
+
+        response = await chatbot.ainvoke(
+            {"user_input": user_input},
+            config={"configurable": {"session_id": session_id}, "temperature": 0.5, "top_p": 0.7},
+        )
         
-        print(f"✅ Extraction data obtained for session {session_id}: {extraction_data}")
-        
-        # Save extraction data separately
-        send_extracted_data(ext_container, session_id, extraction_data)
-        
-        # Cleanup session from memory
+        # Update last_modified timestamp after successful chat
         if session_id in session_storage:
-            del session_storage[session_id]
-            print(f"🧹 Cleaned up session {session_id} from memory")
+            session_storage[session_id]["last_modified"] = datetime.now()
         
-        print(f"✅ Background processing complete for session {session_id}")
+        # Validate response content exists
+        if response is None or not hasattr(response, 'content') or response.content is None:
+            logger.warning(f"⚠️ Warning: Empty response from chatbot for session {session_id}")
+            return "משהו השתבש, אנא נסי שוב 💜"
         
+        #safe_response = escape_special_chars(response.content)
+        return response.content
+    
     except Exception as e:
-        print(f"❌ Error in background conversation processing for session {session_id}: {str(e)}")
-        # Even if extraction fails, try to save the raw conversation
-        try:
-            send_convessation_to_cosmos(conv_container, session_id, messages)
-            print(f"⚠️  Saved conversation without extraction data for session {session_id}")
-        except Exception as save_error:
-            print(f"❌ Failed to save conversation for session {session_id}: {str(save_error)}")
-
+        logger.error(f"❌ Error in chat function for session {session_id}: {e}")
+        logger.error(traceback.format_exc())
+        return "משהו השתבש, אנא נסי שוב 💜"
 
 class InMemoryHistory(BaseChatMessageHistory, BaseModel):
     """Class to store chat history for each session."""
     messages: List[BaseMessage] = Field(default_factory=list)
 
     def add_messages(self, messages: List[BaseMessage]) -> None:
-        """Add messages to the store."""
         self.messages.extend(messages)
 
     def get_messages(self) -> List[BaseMessage]:

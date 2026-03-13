@@ -20,18 +20,24 @@ class BotFrameworkHandler:
         """
         try:
             # Extract session ID and message content
-            session_id = turn_context.activity.conversation.id 
+            session_id = turn_context.activity.conversation.id
             user_message = turn_context.activity.text
+            
+            # Skip processing if message is None or empty (e.g., system messages, typing indicators)
+            if not user_message or not user_message.strip():
+                print(f"⏭️ Skipping empty/None message from session {session_id}")
+                return
             
             print(f"🤖 Bot Framework message received from session {session_id}: {user_message}")
             
-            # check for None user_message
-            if user_message is None:
-                # skip processing and keep listening
-                return
-                            
             # Process the message through the chatbot
             chatbot_response = await chat(session_id, user_message)
+            
+            # Validate chatbot response before sending
+            if not chatbot_response or not chatbot_response.strip():
+                print(f"⚠️ Warning: Empty chatbot response for session {session_id}")
+                chatbot_response = "משהו השתבש אצלנו, נסי שוב עוד רגע 💜"
+            
             print(f"✅ Chatbot response: {chatbot_response}")
 
             # Send the response back through Bot Framework
@@ -47,7 +53,7 @@ class BotFrameworkHandler:
             
         except Exception as e:
             print(f"❌ Error in Bot Framework message handling: {e}")
-            print(f"❌ Problematic message: {user_message}")
+            print(f"❌ Problematic message: {user_message if 'user_message' in locals() else 'N/A'}")
             print(traceback.format_exc())
 
             # Send Hebrew fallback message
@@ -61,7 +67,7 @@ class BotFrameworkHandler:
                         text_format="plain"
                     )
                 )
-                print(f"✅ Fallback message sent to session {session_id}")
+                print(f"✅ Fallback message sent to session {session_id if 'session_id' in locals() else 'unknown'}")
             except Exception as fallback_error:
                 print(f"❌ Error sending fallback message: {fallback_error}")
 

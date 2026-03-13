@@ -21,4 +21,3 @@ python.bidi
 openpyxl
 azure-communication-messages
 azure-eventgrid
-azure-cosmos
