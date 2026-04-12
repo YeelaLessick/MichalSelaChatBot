@@ -3,42 +3,108 @@ Session management module for handling session cleanup and persistence.
 This module provides functionality to track, clean up, and persist chat sessions.
 """
 
+import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, Any
 from langchain_core.chat_history import BaseChatMessageHistory
+
+from extraction_agent import extract_with_retry
+from cosmosdb import send_conversation_to_cosmos, send_extracted_data
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def persist_session_data(session_id: str, history: BaseChatMessageHistory, metadata: Dict[str, Any]):
+def persist_session_data(
+    session_id: str,
+    history: BaseChatMessageHistory,
+    metadata: Dict[str, Any],
+    conv_container=None,
+    ext_container=None,
+):
     """
-    Placeholder function for persisting session data before deletion.
-    TODO: Implement CosmosDB or other storage persistence.
-    
+    Persists session data before deletion.
+    Runs extract_with_retry to extract conversation insights, then uploads
+    both the raw conversation and the extracted data to CosmosDB.
+
     Args:
         session_id: The session identifier
         history: The chat history to persist
         metadata: Session metadata (created_at, last_modified)
+        conv_container: CosmosDB container for raw conversations
+        ext_container: CosmosDB container for extracted data
     """
-    logger.info(f"💾 [Placeholder] Persisting session data for: {session_id}")
-    logger.debug(f"   - Created: {metadata.get('created_at')}")
-    logger.debug(f"   - Last modified: {metadata.get('last_modified')}")
-    logger.debug(f"   - Message count: {len(history.messages)}")
-    # Future implementation will save to CosmosDB
-    pass
+    logger.info(f"💾 Persisting session data for: {session_id}")
+    logger.info(f"   - Created: {metadata.get('created_at')}")
+    logger.info(f"   - Last modified: {metadata.get('last_modified')}")
+    logger.info(f"   - Message count: {len(history.messages)}")
+
+    messages = list(history.messages)
+    if not messages:
+        logger.warning(f"⚠️ No messages to persist for session {session_id}")
+        return
+
+    # --- Upload raw conversation to CosmosDB ---
+    if conv_container is not None:
+        try:
+            send_conversation_to_cosmos(conv_container, session_id, messages)
+        except Exception as e:
+            logger.error(f"❌ Failed to store conversation for {session_id}: {e}")
+    else:
+        logger.warning(f"⚠️ conv_container is None – skipping conversation upload for {session_id}")
+
+    # --- Extract insights and upload to CosmosDB ---
+    if ext_container is not None:
+        try:
+            # extract_with_retry is async; run it in an event loop
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop and loop.is_running():
+                # We're inside an async context – schedule as a task via a new thread
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    extraction_result = pool.submit(
+                        asyncio.run, extract_with_retry(session_id, messages)
+                    ).result(timeout=120)
+            else:
+                extraction_result = asyncio.run(extract_with_retry(session_id, messages))
+
+            if "extraction_error" not in extraction_result:
+                send_extracted_data(ext_container, session_id, extraction_result)
+                logger.info(f"✅ Extraction data uploaded for session {session_id}")
+            else:
+                logger.warning(
+                    f"⚠️ Extraction returned error for {session_id}: "
+                    f"{extraction_result.get('extraction_error')}"
+                )
+                # Still save the partial/error result so nothing is lost
+                send_extracted_data(ext_container, session_id, extraction_result)
+        except Exception as e:
+            logger.error(f"❌ Failed to extract/store data for {session_id}: {e}")
+    else:
+        logger.warning(f"⚠️ ext_container is None – skipping extraction upload for {session_id}")
 
 
-def cleanup_expired_sessions(session_storage: Dict[str, Any], timeout_minutes: int) -> int:
+def cleanup_expired_sessions(
+    session_storage: Dict[str, Any],
+    timeout_minutes: int,
+    conv_container=None,
+    ext_container=None,
+) -> int:
     """
     Removes sessions that haven't been active for timeout_minutes.
-    Calls persist_session_data before deletion.
+    Calls persist_session_data (with extraction + CosmosDB upload) before deletion.
     
     Args:
         session_storage: The dictionary containing all sessions
         timeout_minutes: Number of minutes of inactivity before a session is considered expired
+        conv_container: CosmosDB container for raw conversations
+        ext_container: CosmosDB container for extracted data
         
     Returns:
         Number of sessions cleaned up
@@ -57,14 +123,16 @@ def cleanup_expired_sessions(session_storage: Dict[str, Any], timeout_minutes: i
     # Remove expired sessions
     for session_id, session_data, inactive_minutes in sessions_to_remove:
         try:
-            # Persist data before deletion
+            # Persist data before deletion (extract + upload to CosmosDB)
             persist_session_data(
                 session_id,
                 session_data["history"],
                 {
                     "created_at": session_data.get("created_at"),
                     "last_modified": session_data.get("last_modified")
-                }
+                },
+                conv_container=conv_container,
+                ext_container=ext_container,
             )
             
             # Delete from memory

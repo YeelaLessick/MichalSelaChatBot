@@ -24,3 +24,18 @@ class DefaultConfig:
     # Session cleanup configuration
     SESSION_CLEANUP_INTERVAL_MINUTES = int(os.environ.get("SESSION_CLEANUP_INTERVAL_MINUTES", "30"))
     SESSION_TIMEOUT_MINUTES = int(os.environ.get("SESSION_TIMEOUT_MINUTES", "60"))
+
+# רשימת שדות למיצוי מידע משיחות (בעברית)
+# List of fields for extracting information from conversations (in Hebrew)
+EXTRACTION_FIELDS = [
+    "זמן השיחה",
+    "נושא הפניה",
+    "גיל הפונה",
+    "מין הפונה",
+    "קרבה לגורם המאיים או לשורדת האלימות",
+    "לאן הפנינו",
+    "האם פנתה לאן שהפנינו",
+    "האם קיבלה מענה טוב",
+    "האם היא רוצה שנציג אנושי יחזור אליה",
+]
+

@@ -8,7 +8,7 @@ import traceback
 import os
 import time
 import logging
-from michal_sela_chatbot import setup_chatbot, session_storage
+from michal_sela_chatbot import setup_chatbot, session_storage, conv_container, ext_container
 from bot_framework_handler import handle_bot_framework_message
 from whatsapp_handler import handle_whatsapp_webhook, handle_whatsapp_options
 from config import DefaultConfig
@@ -62,7 +62,12 @@ def session_cleanup_job():
             
             # Run cleanup
             print(f"🧹 Session cleanup #{iteration} started: checking {sessions_before} sessions")
-            cleaned_count = cleanup_expired_sessions(session_storage, CONFIG.SESSION_TIMEOUT_MINUTES)
+            cleaned_count = cleanup_expired_sessions(
+                session_storage,
+                CONFIG.SESSION_TIMEOUT_MINUTES,
+                conv_container=conv_container,
+                ext_container=ext_container,
+            )
             
             # Get stats after cleanup
             sessions_after = get_active_session_count(session_storage)

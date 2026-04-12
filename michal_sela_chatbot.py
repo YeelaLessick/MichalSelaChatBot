@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 from typing import List
 import pandas as pd
 from azure.storage.blob import BlobServiceClient
@@ -12,9 +13,11 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_openai import AzureChatOpenAI
-import re
 import asyncio
+from cosmosdb import is_end_conversation_message, connect_to_cosmos
+from session_manager import persist_session_data
 from datetime import datetime, timedelta
+
 import logging
 import traceback
 
@@ -26,10 +29,12 @@ logger = logging.getLogger(__name__)
 # session_storage structure: session_id -> {"history": InMemoryHistory, "last_modified": datetime, "created_at": datetime}
 session_storage = {}
 chatbot_chain = None  # Will be initialized once
+conv_container = None
+ext_container = None
 
 def setup_chatbot():
     """Initializes chatbot components once at startup."""
-    global chatbot_chain
+    global chatbot_chain, conv_container, ext_container
 
     # Load environment variables
     load_dotenv(override=True)
@@ -38,6 +43,11 @@ def setup_chatbot():
         "endpoint": os.getenv("AZURE_OPENAI_ENDPOINT"),
         "deployment_name": os.getenv("DEPLOYMENT_NAME"),
         "api_version": os.getenv("AZURE_OPENAI_API_VERSION"),
+        "connection_string": os.getenv("COSMOSDB_CONNECTIONS_STRING"),
+        "conversations_database_name": os.getenv("COSMOSDB_CONV_DATABASE"),
+        "conversations_container_name": os.getenv("COSMOSDB_CONV_CONTAINER"),
+        "extracted_data_database_name": os.getenv("COSMOSDB_EXT_DATABASE"),
+        "extracted_data_container_name": os.getenv("COSMOSDB_EXT_CONTAINER"),
     }
 
     # Load data for examples and communication centers
@@ -89,6 +99,20 @@ def setup_chatbot():
     )
 
     chain = prompt | llm
+
+    conv_container = connect_to_cosmos(
+        env_vars["connection_string"],
+        env_vars["conversations_database_name"],
+        env_vars["conversations_container_name"],
+    )
+
+    ext_container = connect_to_cosmos(
+        env_vars["connection_string"],
+        env_vars["extracted_data_database_name"],
+        env_vars["extracted_data_container_name"],
+    )
+
+    print("✅ Cosmos DB containers connected successfully")
 
     # Function to handle per-user session history with metadata tracking
     def get_history(session_id):
@@ -200,20 +224,41 @@ def format_examples_and_communication(examples_text, communication_text):
 
     return formatted_examples, formatted_communication
 
-# def escape_special_chars(text: str) -> str:
-#     """
-#     Escapes all characters that are reserved in Telegram MarkdownV2.
-#     """
-#     if not text:
-#         return text
-
-#     escape_chars = r'_*\[\]()~`>#+-=|{}.!'
-#     return re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', text)
-
 async def chat(session_id, user_input):
     """Handles a chat request using the session-specific chatbot."""
     try:
         chatbot = get_chatbot()
+
+        if user_input is None:
+            user_input = ""
+
+        if is_end_conversation_message(user_input):
+            session_data = session_storage.get(session_id)
+            if session_data and len(session_data["history"].messages) > 0:
+                logger.info(f"Conversation end detected for session {session_id}, "
+                            f"messages: {len(session_data['history'].messages)}")
+                # Run persist_session_data in a background thread so we
+                # return a response to the user immediately.
+                thread = threading.Thread(
+                    target=persist_session_data,
+                    args=(
+                        session_id,
+                        session_data["history"],
+                        {
+                            "created_at": session_data.get("created_at"),
+                            "last_modified": session_data.get("last_modified"),
+                        },
+                    ),
+                    kwargs={
+                        "conv_container": conv_container,
+                        "ext_container": ext_container,
+                    },
+                    daemon=True,
+                )
+                thread.start()
+
+            return "השיחה הסתיימה. תודה שפנית אלינו."
+
         response = await chatbot.ainvoke(
             {"user_input": user_input},
             config={"configurable": {"session_id": session_id}, "temperature": 0.5, "top_p": 0.7},
@@ -230,7 +275,7 @@ async def chat(session_id, user_input):
         
         #safe_response = escape_special_chars(response.content)
         return response.content
-        
+    
     except Exception as e:
         logger.error(f"❌ Error in chat function for session {session_id}: {e}")
         logger.error(traceback.format_exc())
@@ -242,6 +287,19 @@ class InMemoryHistory(BaseChatMessageHistory, BaseModel):
 
     def add_messages(self, messages: List[BaseMessage]) -> None:
         self.messages.extend(messages)
+
+    def get_messages(self) -> List[BaseMessage]:
+        return self.messages
+    
+    def get_messages_as_json(self) -> str:
+        """Returns the chat history as a JSON string."""
+        serialized = []
+        for msg in self.messages:
+            serialized.append({
+                "type": msg.type,
+                "content": msg.content
+            })
+        return json.dumps(serialized, ensure_ascii=False, indent=4)
 
     def clear(self) -> None:
         self.messages = []
