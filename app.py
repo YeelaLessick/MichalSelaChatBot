@@ -8,8 +8,8 @@ import traceback
 import os
 import time
 import logging
-import michal_sela_chatbot
 from michal_sela_chatbot import setup_chatbot, session_storage
+import michal_sela_chatbot
 from bot_framework_handler import handle_bot_framework_message
 from whatsapp_handler import handle_whatsapp_webhook, handle_whatsapp_options
 from config import DefaultConfig
