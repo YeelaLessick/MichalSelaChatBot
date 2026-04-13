@@ -14,7 +14,7 @@ from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_openai import AzureChatOpenAI
 import asyncio
-from cosmosdb import is_end_conversation_message, send_convessation_to_cosmos, send_extracted_data, connect_to_cosmos
+from cosmosdb import is_end_conversation_message, send_conversation_to_cosmos, send_extracted_data, connect_to_cosmos
 from datetime import datetime, timedelta
 from extraction_agent import extract_with_retry
 
