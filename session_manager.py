@@ -69,13 +69,13 @@ def persist_session_data(
                 import concurrent.futures
                 with concurrent.futures.ThreadPoolExecutor() as pool:
                     extraction_result = pool.submit(
-                        asyncio.run, extract_with_retry(session_id, messages)
+                        asyncio.run, extract_with_retry(session_id, messages, session_metadata=metadata)
                     ).result(timeout=120)
             else:
-                extraction_result = asyncio.run(extract_with_retry(session_id, messages))
+                extraction_result = asyncio.run(extract_with_retry(session_id, messages, session_metadata=metadata))
 
             if "extraction_error" not in extraction_result:
-                send_extracted_data(ext_container, session_id, extraction_result)
+                send_extracted_data(ext_container, session_id, extraction_result, session_metadata=metadata)
                 logger.info(f"✅ Extraction data uploaded for session {session_id}")
             else:
                 logger.warning(
@@ -83,7 +83,7 @@ def persist_session_data(
                     f"{extraction_result.get('extraction_error')}"
                 )
                 # Still save the partial/error result so nothing is lost
-                send_extracted_data(ext_container, session_id, extraction_result)
+                send_extracted_data(ext_container, session_id, extraction_result, session_metadata=metadata)
         except Exception as e:
             logger.error(f"❌ Failed to extract/store data for {session_id}: {e}")
     else:
@@ -129,7 +129,9 @@ def cleanup_expired_sessions(
                 session_data["history"],
                 {
                     "created_at": session_data.get("created_at"),
-                    "last_modified": session_data.get("last_modified")
+                    "last_modified": session_data.get("last_modified"),
+                    "channel": session_data.get("channel", "unknown"),
+                    "phone_number": session_data.get("phone_number"),
                 },
                 conv_container=conv_container,
                 ext_container=ext_container,

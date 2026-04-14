@@ -7,7 +7,16 @@ from langchain_openai import AzureChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import BaseMessage
 from dotenv import load_dotenv
-from config import EXTRACTION_FIELDS
+from config import (
+    EXTRACTION_FIELDS,
+    INQUIRY_SUBJECT_OPTIONS,
+    CALLER_GENDER_OPTIONS,
+    CALLER_AGE_RANGE_OPTIONS,
+    RELATIONSHIP_OPTIONS,
+    REFERRED_TO_OPTIONS,
+    YES_NO_OPTIONS,
+    URGENCY_LEVEL_OPTIONS,
+)
 
 # Load environment variables
 load_dotenv()
@@ -23,10 +32,11 @@ FIELD_NAME_MAPPING = {
     "האם פנתה לאן שהפנינו": "contacted_referral",
     "האם קיבלה מענה טוב": "received_good_response",
     "האם היא רוצה שנציג אנושי יחזור אליה": "wants_human_callback",
+    "רמת דחיפות": "urgency_level",
 }
 
 
-async def extract_conversation_insights(session_id: str, messages: List[BaseMessage]) -> Dict[str, Any]:
+async def extract_conversation_insights(session_id: str, messages: List[BaseMessage], session_metadata: Dict[str, Any] = None) -> Dict[str, Any]:
     print(f"🔍 Starting extraction for session {session_id} with {len(messages)} messages")
     try:
         # Convert messages to readable text format
@@ -46,22 +56,39 @@ async def extract_conversation_insights(session_id: str, messages: List[BaseMess
                 "extraction_note": "No fields configured for extraction"
             }
         
-        # Build dynamic extraction prompt based on configured fields
-        fields_list = "\n".join([f"- {field}" for field in EXTRACTION_FIELDS])
-        
+        # Build dynamic extraction prompt with constrained categories
+        def _fmt(options):
+            return " | ".join(options)
+
         extraction_prompt = ChatPromptTemplate.from_messages([
             ("system", f"""את סוכן חילוץ מידע ממומחה. תפקידך לנתח שיחות עם אנשים שפונים בנושא אלימות במשפחה.
-חלצי מידע מובנה מהשיחה הבאה על בסיס השדות הבאים:
+חלצי מידע מובנה מהשיחה הבאה. עבור כל שדה, בחרי **רק** מתוך הערכים המותרים שמופיעים בסוגריים.
+אם שדה לא רלוונטי או לא נמצא בשיחה, השתמשי בערך null.
 
-{fields_list}
+שדות לחילוץ:
+- "נושא הפניה": [{_fmt(INQUIRY_SUBJECT_OPTIONS)}]
+- "גיל הפונה": [{_fmt(CALLER_AGE_RANGE_OPTIONS)}]
+- "מין הפונה": [{_fmt(CALLER_GENDER_OPTIONS)}]
+- "קרבה לגורם המאיים או לשורדת האלימות": [{_fmt(RELATIONSHIP_OPTIONS)}]
+- "לאן הפנינו": [{_fmt(REFERRED_TO_OPTIONS)}]
+- "האם פנתה לאן שהפנינו": [{_fmt(YES_NO_OPTIONS)}]
+- "האם קיבלה מענה טוב": [{_fmt(YES_NO_OPTIONS)}]
+- "האם היא רוצה שנציג אנושי יחזור אליה": [{_fmt(YES_NO_OPTIONS)}]
+- "רמת דחיפות": [{_fmt(URGENCY_LEVEL_OPTIONS)}]
 
-החזירי את התשובה בפורמט JSON בלבד, עם מפתח לכל שדה מהרשימה לעיל.
-אם שדה מסוים לא רלוונטי או לא נמצא בשיחה, השתמשי בערך null.
-דוגמה לפורמט:
+חשוב מאוד: הערכים חייבים להיות **בדיוק** כפי שמופיעים ברשימה. אל תשני ניסוח, אל תוסיפי מילים.
+
+החזירי JSON בלבד:
 {{{{
-    "שדה1": "ערך",
-    "שדה2": null,
-    "שדה3": "ערך אחר"
+    "נושא הפניה": "...",
+    "גיל הפונה": "...",
+    "מין הפונה": "...",
+    "קרבה לגורם המאיים או לשורדת האלימות": "...",
+    "לאן הפנינו": "...",
+    "האם פנתה לאן שהפנינו": "...",
+    "האם קיבלה מענה טוב": "...",
+    "האם היא רוצה שנציג אנושי יחזור אליה": "...",
+    "רמת דחיפות": "..."
 }}}}
 """),
             ("human", "שיחה:\n{conversation}")
@@ -104,6 +131,20 @@ async def extract_conversation_insights(session_id: str, messages: List[BaseMess
                 print(f"⚠️  LLM response was not valid JSON, storing as raw text")
                 extracted_data = {"raw_response": result.content}
         
+        # Compute conversation duration from session metadata (created_at → last_modified)
+        conversation_duration_minutes = None
+        if session_metadata:
+            created = session_metadata.get("created_at")
+            last_mod = session_metadata.get("last_modified")
+            if created and last_mod:
+                try:
+                    delta = last_mod - created
+                    conversation_duration_minutes = round(delta.total_seconds() / 60, 1)
+                except Exception:
+                    pass
+
+        extracted_data["conversation_time"] = conversation_duration_minutes
+
         return {
             "session_id": session_id,
             "extraction_timestamp": datetime.utcnow().isoformat(),
@@ -132,7 +173,7 @@ async def extract_conversation_insights(session_id: str, messages: List[BaseMess
         }
 
 
-async def extract_with_retry(session_id: str, messages: List[BaseMessage], max_retries: int = 3) -> Dict[str, Any]:
+async def extract_with_retry(session_id: str, messages: List[BaseMessage], max_retries: int = 3, session_metadata: Dict[str, Any] = None) -> Dict[str, Any]:
     attempt = 0
     last_error = None
     
@@ -140,7 +181,7 @@ async def extract_with_retry(session_id: str, messages: List[BaseMessage], max_r
         try:
             print(f"🔄 Extraction attempt {attempt + 1}/{max_retries} for session {session_id}")
             
-            result = await extract_conversation_insights(session_id, messages)
+            result = await extract_conversation_insights(session_id, messages, session_metadata=session_metadata)
             
             # Check if extraction was successful (no error field)
             if "extraction_error" not in result:

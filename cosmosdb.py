@@ -58,12 +58,16 @@ def send_conversation_to_cosmos(container, session_id, messages):
         print(f"❌ Error storing conversation to Cosmos DB: {str(e)}")
 
 # send extracted data to cosmos db
-def send_extracted_data(container, session_id, extraction_data):
+def send_extracted_data(container, session_id, extraction_data, session_metadata=None):
     if container is None:
         raise Exception("Cosmos DB container is not connected.")
     try:
         from datetime import datetime
         
+        meta = session_metadata or {}
+        channel = meta.get("channel", "unknown")
+        phone_number = meta.get("phone_number")
+
         # Build extraction item
         item = {
             "id": f"{session_id}_extraction",
@@ -71,8 +75,9 @@ def send_extracted_data(container, session_id, extraction_data):
             "Extraction": extraction_data,
             "Metadata": {
                 "extraction_timestamp": datetime.utcnow().isoformat(),
-                "channel": "whatsapp" if "whatsapp_" in session_id else "bot_framework",
-                "original_session_id": session_id
+                "channel": channel,
+                "original_session_id": session_id,
+                "phone_number": phone_number,
             }
         }
         
