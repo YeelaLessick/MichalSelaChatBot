@@ -283,7 +283,12 @@ async def chat(session_id, user_input):
                     daemon=True
                 )
                 thread.start()
-        
+
+            # Delete session from memory, same as the background cleanup job does
+            if session_id in session_storage:
+                del session_storage[session_id]
+                logger.info(f"🗑️  Session deleted on end: {session_id}")
+
             # Return response to user immediately
             return "השיחה הסתיימה. תודה שפנית אלינו."
 
