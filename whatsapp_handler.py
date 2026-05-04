@@ -1,10 +1,15 @@
 import json
+import uuid
 from typing import Dict, Any, Optional
 from azure.eventgrid import EventGridEvent
 import asyncio
 import traceback
-from michal_sela_chatbot import chat
+from michal_sela_chatbot import chat, session_storage
 from communication_client import send_whatsapp_message
+
+# Maps clean phone number -> active session_id.
+# Cleared automatically when a session ends (user sends "end" or background cleanup).
+_phone_sessions: Dict[str, str] = {}
 
 class WhatsAppEventHandler:
     """Handles Event Grid webhooks from Azure Communication Services for WhatsApp"""
@@ -134,14 +139,23 @@ class WhatsAppEventHandler:
                 print("❌ Missing sender phone or message content")
                 return
             
-            # Create session ID from phone number (remove + and special characters)
-            session_id = f"whatsapp_{sender_phone.replace('+', '').replace('-', '').replace(' ', '')}"
-            
+            clean_phone = sender_phone.replace('+', '').replace('-', '').replace(' ', '')
+
+            # Reuse existing session or create a new unique one
+            session_id = _phone_sessions.get(clean_phone)
+            if not session_id or session_id not in session_storage:
+                session_id = f"whatsapp_{clean_phone}_{uuid.uuid4().hex[:8]}"
+                _phone_sessions[clean_phone] = session_id
+
             # Process the message through the chatbot
             try:
                 print(f"🤖 Processing message through chatbot for session: {session_id}")
                 chatbot_response = await chat(session_id, message_content)
                 print(f"✅ Chatbot response: {chatbot_response}")
+
+                # If the session was ended (by user or background cleanup), remove from map
+                if session_id not in session_storage:
+                    _phone_sessions.pop(clean_phone, None)
                 
                 # Send the response back via WhatsApp
                 success = await send_whatsapp_message(sender_phone, chatbot_response)

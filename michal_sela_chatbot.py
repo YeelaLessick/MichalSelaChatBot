@@ -122,7 +122,9 @@ def setup_chatbot():
             # Derive channel and phone from session_id
             if session_id.startswith("whatsapp_"):
                 channel = "whatsapp"
-                phone_number = session_id.replace("whatsapp_", "")
+                # Format is whatsapp_{phone}_{uuid8}; strip prefix then drop optional uuid suffix
+                raw = session_id[len("whatsapp_"):]
+                phone_number = raw.rsplit("_", 1)[0] if "_" in raw else raw
             else:
                 channel = "bot_framework"
                 phone_number = None
