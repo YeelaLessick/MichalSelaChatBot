@@ -103,6 +103,63 @@ variable "cosmosdb_ip_range_filter" {
   default     = ""
 }
 
+# PostgreSQL Flexible Server variables (replacement for Cosmos DB)
+variable "postgres_server_name" {
+  description = "Name of the PostgreSQL Flexible Server (must be globally unique)"
+  type        = string
+}
+
+variable "postgres_location" {
+  description = "Azure region for the Postgres server (Burstable B1ms is widely available; pick one with capacity)"
+  type        = string
+  default     = "westeurope"
+}
+
+variable "postgres_database_name" {
+  description = "Name of the application database"
+  type        = string
+  default     = "chatbot"
+}
+
+variable "postgres_sku_name" {
+  description = "Compute SKU. B_Standard_B1ms ~ $13/mo."
+  type        = string
+  default     = "B_Standard_B1ms"
+}
+
+variable "postgres_storage_mb" {
+  description = "Storage in MB (min 32768)"
+  type        = number
+  default     = 32768
+}
+
+variable "postgres_zone" {
+  description = "Availability zone for the server (1/2/3 or null)"
+  type        = string
+  default     = null
+}
+
+variable "postgres_entra_admin_object_id" {
+  description = "Entra user object ID to make Postgres admin (for psql/dashboard access). Optional."
+  type        = string
+  default     = ""
+}
+
+variable "postgres_entra_admin_principal_name" {
+  description = "UPN of the Entra admin user"
+  type        = string
+  default     = ""
+}
+
+variable "postgres_firewall_rules" {
+  description = "Extra firewall rules for the Postgres server: map of name -> { start_ip, end_ip }"
+  type = map(object({
+    start_ip = string
+    end_ip   = string
+  }))
+  default = {}
+}
+
 # Communication Service variables
 variable "communication_service_name" {
   description = "Name of the Communication Service"

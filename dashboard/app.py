@@ -1,7 +1,7 @@
 """
 Michal Sela ChatBot – Extraction Statistics Dashboard
 =====================================================
-A Streamlit dashboard that queries the Cosmos DB extractions container
+A Streamlit dashboard that queries the Postgres `extractions` table
 and displays interactive statistics about conversation insights.
 
 Run with:
@@ -10,93 +10,152 @@ Run with:
 
 import os
 import sys
+import time
+import threading
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta, timezone
-from azure.cosmos import CosmosClient
+import psycopg
+from psycopg.rows import dict_row
 from dotenv import load_dotenv
 from collections import Counter
 
+# Add parent directory to path so we can import config
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from config import MULTI_VALUE_FIELDS
+
 # ---------------------------------------------------------------------------
-# Configuration — supports both Streamlit Cloud (st.secrets) and local (.env)
+# Configuration – supports both Streamlit Cloud (st.secrets) and local (.env)
 # ---------------------------------------------------------------------------
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 
-def _get_secret(st_key: str, env_key: str) -> str:
+def _get_secret(st_key: str, env_key: str, default: str = "") -> str:
     """Read from st.secrets (Streamlit Cloud) first, fall back to env var."""
     try:
-        return st.secrets["cosmos"][st_key]
+        return st.secrets["postgres"][st_key]
     except (KeyError, FileNotFoundError):
-        return os.getenv(env_key, "")
+        return os.getenv(env_key, default)
 
 
-COSMOS_CONNECTION_STRING = _get_secret("connection_string", "COSMOSDB_CONNECTIONS_STRING")
-EXT_DATABASE = _get_secret("ext_database", "COSMOSDB_EXT_DATABASE")
-EXT_CONTAINER = _get_secret("ext_container", "COSMOSDB_EXT_CONTAINER")
-CONV_DATABASE = _get_secret("conv_database", "COSMOSDB_CONV_DATABASE")
-CONV_CONTAINER = _get_secret("conv_container", "COSMOSDB_CONV_CONTAINER")
+PG_HOST     = _get_secret("host",     "POSTGRES_HOST")
+PG_PORT     = _get_secret("port",     "POSTGRES_PORT",   "5432")
+PG_DB       = _get_secret("database", "POSTGRES_DB",     "chatbot")
+PG_USER     = _get_secret("user",     "POSTGRES_USER")
+PG_PASSWORD = _get_secret("password", "POSTGRES_PASSWORD")
+PG_SSLMODE  = _get_secret("sslmode",  "POSTGRES_SSLMODE", "require")
+USE_AAD     = _get_secret("use_aad",  "POSTGRES_USE_AAD", "").lower() in ("1", "true", "yes")
 
 # ---------------------------------------------------------------------------
-# Cosmos DB helpers
+# Postgres helpers (with AAD token caching)
 # ---------------------------------------------------------------------------
 
-@st.cache_resource
-def get_cosmos_client():
-    """Create a persistent Cosmos DB client."""
-    if not COSMOS_CONNECTION_STRING:
-        return None
-    return CosmosClient.from_connection_string(COSMOS_CONNECTION_STRING)
+_AAD_SCOPE = "https://ossrdbms-aad.database.windows.net/.default"
+_token_cache: dict = {"token": None, "expires_at": 0.0}
+_token_lock = threading.Lock()
+
+
+def _get_aad_token() -> str:
+    now = time.time()
+    with _token_lock:
+        cached = _token_cache["token"]
+        if cached and _token_cache["expires_at"] - now > 300:
+            return cached
+        from azure.identity import DefaultAzureCredential
+        cred = DefaultAzureCredential(
+            managed_identity_client_id=os.environ.get("AZURE_CLIENT_ID")
+        )
+        access = cred.get_token(_AAD_SCOPE)
+        _token_cache["token"] = access.token
+        _token_cache["expires_at"] = float(access.expires_on)
+        return access.token
+
+
+def _connect() -> psycopg.Connection:
+    """Open a fresh Postgres connection (AAD or password)."""
+    if not PG_HOST or not PG_USER:
+        raise RuntimeError(
+            "Postgres connection not configured. Set POSTGRES_HOST / POSTGRES_USER "
+            "(and POSTGRES_PASSWORD or POSTGRES_USE_AAD=true) in .env or st.secrets."
+        )
+    password = _get_aad_token() if USE_AAD else PG_PASSWORD
+    return psycopg.connect(
+        host=PG_HOST,
+        port=int(PG_PORT),
+        dbname=PG_DB,
+        user=PG_USER,
+        password=password,
+        sslmode=PG_SSLMODE,
+        connect_timeout=10,
+        row_factory=dict_row,
+    )
 
 
 @st.cache_data(ttl=300)  # cache for 5 minutes
 def load_extractions() -> pd.DataFrame:
-    """Fetch all extraction documents from Cosmos DB and return as a DataFrame."""
-    client = get_cosmos_client()
-    if client is None:
-        return pd.DataFrame()
-
+    """Fetch all extraction documents from Postgres and return as a DataFrame."""
     try:
-        database = client.get_database_client(EXT_DATABASE)
-        container = database.get_container_client(EXT_CONTAINER)
-
-        query = "SELECT * FROM c"
-        items = list(container.query_items(query=query, enable_cross_partition_query=True))
+        with _connect() as conn:
+            with conn.cursor() as cur:
+                # Postgres does the JSON projection for us – way more efficient
+                # than fetching whole documents and unpacking in Python.
+                cur.execute(
+                    """
+                    SELECT
+                        session_id,
+                        extraction,
+                        metadata,
+                        COALESCE(
+                            (extraction->>'extraction_timestamp')::timestamptz,
+                            (metadata->>'extraction_timestamp')::timestamptz,
+                            created_at
+                        ) AS extraction_timestamp,
+                        COALESCE((extraction->>'message_count')::int, 0) AS message_count,
+                        COALESCE(metadata->>'channel', 'unknown')        AS channel,
+                        metadata->>'phone_number'                        AS phone_number,
+                        (extraction ? 'extraction_error')                AS has_error
+                    FROM extractions
+                    ORDER BY created_at DESC
+                    """
+                )
+                items = cur.fetchall()
 
         if not items:
             return pd.DataFrame()
 
         rows = []
         for item in items:
-            extraction = item.get("Extraction", {})
-            metadata = item.get("Metadata", {})
-            fields = extraction.get("extracted_fields", {})
-
-            row = {
-                "session_id": extraction.get("session_id", item.get("SessionId", "")),
-                "extraction_timestamp": extraction.get("extraction_timestamp")
-                    or metadata.get("extraction_timestamp"),
-                "message_count": extraction.get("message_count", 0),
-                "channel": metadata.get("channel", "unknown"),
-                "phone_number": metadata.get("phone_number"),
-                "has_error": "extraction_error" in extraction,
-                # Extracted fields (English keys)
-                "conversation_time": fields.get("conversation_time"),
-                "inquiry_subject": fields.get("inquiry_subject"),
-                "caller_age": fields.get("caller_age"),
-                "caller_gender": fields.get("caller_gender"),
+            extraction = item.get("extraction") or {}
+            fields = extraction.get("extracted_fields", {}) if isinstance(extraction, dict) else {}
+            rows.append({
+                "session_id":           item["session_id"],
+                "extraction_timestamp": item["extraction_timestamp"],
+                "message_count":        item["message_count"],
+                "channel":              item["channel"],
+                "phone_number":         item["phone_number"],
+                "has_error":            item["has_error"],
+                "conversation_time":    fields.get("conversation_time"),
+                "inquiry_subject":      fields.get("inquiry_subject"),
+                "caller_age":           fields.get("caller_age"),
+                "caller_gender":        fields.get("caller_gender"),
                 "relationship_to_threat": fields.get("relationship_to_threat"),
-                "referred_to": fields.get("referred_to"),
-                "contacted_referral": fields.get("contacted_referral"),
+                "referred_to":          fields.get("referred_to"),
+                "contacted_referral":   fields.get("contacted_referral"),
                 "received_good_response": fields.get("received_good_response"),
                 "wants_human_callback": fields.get("wants_human_callback"),
-                "urgency_level": fields.get("urgency_level"),
-            }
-            rows.append(row)
+                "urgency_level":        fields.get("urgency_level"),
+            })
 
         df = pd.DataFrame(rows)
+
+        # Normalise multi-value fields: ensure they are always lists
+        for col in MULTI_VALUE_FIELDS:
+            if col in df.columns:
+                df[col] = df[col].apply(
+                    lambda v: v if isinstance(v, list) else ([v] if v is not None and v == v else [])
+                )
 
         # Parse timestamp
         if "extraction_timestamp" in df.columns:
@@ -107,32 +166,38 @@ def load_extractions() -> pd.DataFrame:
         return df
 
     except Exception as e:
-        st.error(f"Error loading data from Cosmos DB: {e}")
+        st.error(f"Error loading data from Postgres: {e}")
         return pd.DataFrame()
 
 
 @st.cache_data(ttl=300)
 def load_conversations() -> pd.DataFrame:
-    """Fetch conversation metadata (message counts) from Cosmos DB."""
-    client = get_cosmos_client()
-    if client is None:
-        return pd.DataFrame()
-
+    """Fetch conversation metadata (message counts) from Postgres."""
     try:
-        database = client.get_database_client(CONV_DATABASE)
-        container = database.get_container_client(CONV_CONTAINER)
-
-        query = "SELECT c.id, c.SessionId, ARRAY_LENGTH(c.Conversation) AS msg_count FROM c"
-        items = list(container.query_items(query=query, enable_cross_partition_query=True))
-
-        if not items:
+        with _connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        session_id,
+                        jsonb_array_length(conversation) AS msg_count
+                    FROM conversations
+                    """
+                )
+                rows = cur.fetchall()
+        if not rows:
             return pd.DataFrame()
-
-        return pd.DataFrame(items)
-
+        return pd.DataFrame(rows)
     except Exception as e:
         st.error(f"Error loading conversations: {e}")
         return pd.DataFrame()
+
+
+def _explode_multi(df: pd.DataFrame, col: str) -> pd.Series:
+    """Explode a list-valued column and return the individual values (drop empties)."""
+    exploded = df[col].explode().dropna()
+    exploded = exploded[exploded.astype(str).str.strip() != ""]
+    return exploded
 
 
 # ---------------------------------------------------------------------------
@@ -163,18 +228,19 @@ st.set_page_config(
 )
 
 st.title("💜 Michal Sela Chatbot – Extraction Statistics")
-st.caption("Live statistics from conversation extractions stored in Cosmos DB")
+st.caption("Live statistics from conversation extractions stored in Postgres")
 
 # ---------------------------------------------------------------------------
 # Load data
 # ---------------------------------------------------------------------------
-with st.spinner("Loading data from Cosmos DB …"):
+with st.spinner("Loading data from Postgres …"):
     df = load_extractions()
 
 if df.empty:
     st.warning(
-        "No extraction data found. Make sure the Cosmos DB connection string and "
-        "container names are configured in your `.env` file."
+        "No extraction data found. Make sure the Postgres connection settings "
+        "(POSTGRES_HOST / POSTGRES_USER / POSTGRES_PASSWORD or POSTGRES_USE_AAD) "
+        "are configured in your `.env` file."
     )
     st.stop()
 
@@ -339,7 +405,8 @@ st.header("📋 Inquiry Analysis")
 col_i1, col_i2 = st.columns(2)
 
 # Inquiry subject
-subject_counts = df["inquiry_subject"].dropna().value_counts().reset_index()
+subject_values = _explode_multi(df, "inquiry_subject")
+subject_counts = subject_values.value_counts().reset_index()
 subject_counts.columns = ["subject", "count"]
 if not subject_counts.empty:
     fig_subject = px.bar(
@@ -381,7 +448,8 @@ st.header("🔗 Referral Analysis")
 col_r1, col_r2 = st.columns(2)
 
 # Where referred
-referred_counts = df["referred_to"].dropna().value_counts().reset_index()
+referred_values = _explode_multi(df, "referred_to")
+referred_counts = referred_values.value_counts().reset_index()
 referred_counts.columns = ["referred_to", "count"]
 if not referred_counts.empty:
     fig_referred = px.bar(
@@ -531,8 +599,15 @@ with st.expander("Show raw data table", expanded=False):
         "has_error",
     ]
     available_cols = [c for c in display_cols if c in df.columns]
+    display_df = df[available_cols].copy()
+    # Join array fields into readable comma-separated strings for display
+    for col in MULTI_VALUE_FIELDS:
+        if col in display_df.columns:
+            display_df[col] = display_df[col].apply(
+                lambda v: ", ".join(v) if isinstance(v, list) else v
+            )
     st.dataframe(
-        df[available_cols].sort_values("extraction_timestamp", ascending=False),
+        display_df.sort_values("extraction_timestamp", ascending=False),
         width="stretch",
         hide_index=True,
     )

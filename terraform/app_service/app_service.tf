@@ -30,6 +30,13 @@ resource "azurerm_linux_web_app" "main" {
       AZURE_OPENAI_API_VERSION = var.azure_openai_api_version
       DEPLOYMENT_NAME          = var.azure_openai_deployment_name
     } : {},
+    var.postgres_host != null ? {
+      # Only deployment-specific vars are pushed; constants (port, db, sslmode,
+      # USE_AAD) live in config.py / PostgresConfig.
+      POSTGRES_HOST   = var.postgres_host
+      POSTGRES_USER   = var.postgres_user
+      AZURE_CLIENT_ID = var.managed_identity_client_id
+    } : {},
     var.additional_app_settings
   )
 

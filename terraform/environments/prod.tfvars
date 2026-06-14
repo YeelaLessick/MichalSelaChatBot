@@ -30,6 +30,14 @@ cosmosdb_name           = "michalsela-cosmosdb"
 cosmosdb_enable_free_tier = false
 cosmosdb_ip_range_filter = ""
 
+# PostgreSQL Flexible Server (replaces Cosmos DB)
+postgres_server_name   = "michalsela-pg"
+postgres_location      = "westeurope"
+postgres_database_name = "chatbot"
+postgres_sku_name      = "B_Standard_B1ms"
+postgres_storage_mb    = 32768
+postgres_firewall_rules = {}
+
 # Communication Service
 communication_service_name = "michalsela-communication"
 communication_data_location = "Europe"

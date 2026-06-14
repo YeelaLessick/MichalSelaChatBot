@@ -25,6 +25,34 @@ class DefaultConfig:
     SESSION_CLEANUP_INTERVAL_MINUTES = int(os.environ.get("SESSION_CLEANUP_INTERVAL_MINUTES", "720"))
     SESSION_TIMEOUT_MINUTES = int(os.environ.get("SESSION_TIMEOUT_MINUTES", "1440"))
 
+
+class PostgresConfig:
+    """Postgres connection settings.
+
+    Static, non-secret defaults live here so deployments only need to set
+    a small number of environment variables (HOST, USER, AZURE_CLIENT_ID).
+    Any of these can still be overridden via an env var of the same name.
+    """
+
+    # Constants (override via env var of the same name if ever needed)
+    PORT = os.environ.get("POSTGRES_PORT", "5432")
+    DATABASE = os.environ.get("POSTGRES_DB", "chatbot")
+    SSLMODE = os.environ.get("POSTGRES_SSLMODE", "require")
+
+    # AAD on by default; flip to "false" locally to use POSTGRES_PASSWORD.
+    USE_AAD = os.environ.get("POSTGRES_USE_AAD", "true").lower() in ("1", "true", "yes")
+
+    # AAD scope for Postgres flexible server
+    AAD_SCOPE = "https://ossrdbms-aad.database.windows.net/.default"
+
+    # Deployment-specific (must be set per-environment)
+    HOST = os.environ.get("POSTGRES_HOST")
+    USER = os.environ.get("POSTGRES_USER")
+    # Used by DefaultAzureCredential when multiple MIs are attached
+    AZURE_CLIENT_ID = os.environ.get("AZURE_CLIENT_ID")
+    # Only used when USE_AAD is false (local dev)
+    PASSWORD = os.environ.get("POSTGRES_PASSWORD")
+
 # רשימת שדות למיצוי מידע משיחות (בעברית)
 # List of fields for extracting information from conversations (in Hebrew)
 EXTRACTION_FIELDS = [

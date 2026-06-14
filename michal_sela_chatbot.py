@@ -14,7 +14,12 @@ from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_openai import AzureChatOpenAI
 import asyncio
-from cosmosdb import is_end_conversation_message, send_conversation_to_cosmos, send_extracted_data, connect_to_cosmos
+from db import (
+    is_end_conversation_message,
+    save_conversation,
+    save_extraction,
+    connect_to_db,
+)
 from datetime import datetime, timedelta
 from extraction_agent import extract_with_retry
 
@@ -29,12 +34,10 @@ logger = logging.getLogger(__name__)
 # session_storage structure: session_id -> {"history": InMemoryHistory, "last_modified": datetime, "created_at": datetime}
 session_storage = {}
 chatbot_chain = None  # Will be initialized once
-conv_container = None
-ext_container = None
 
 def setup_chatbot():
     """Initializes chatbot components once at startup."""
-    global chatbot_chain, conv_container, ext_container
+    global chatbot_chain
 
     # Load environment variables
     load_dotenv(override=True)
@@ -43,11 +46,6 @@ def setup_chatbot():
         "endpoint": os.getenv("AZURE_OPENAI_ENDPOINT"),
         "deployment_name": os.getenv("DEPLOYMENT_NAME"),
         "api_version": os.getenv("AZURE_OPENAI_API_VERSION"),
-        "connection_string": os.getenv("COSMOSDB_CONNECTIONS_STRING"),
-        "conversations_database_name": os.getenv("COSMOSDB_CONV_DATABASE"),
-        "conversations_container_name": os.getenv("COSMOSDB_CONV_CONTAINER"),
-        "extracted_data_database_name": os.getenv("COSMOSDB_EXT_DATABASE"),
-        "extracted_data_container_name": os.getenv("COSMOSDB_EXT_CONTAINER"),
     }
 
     # Load data for examples and communication centers
@@ -116,19 +114,13 @@ def setup_chatbot():
 
     chain = prompt | llm
 
-    conv_container = connect_to_cosmos(
-        env_vars["connection_string"],
-        env_vars["conversations_database_name"],
-        env_vars["conversations_container_name"],
-    )
-
-    ext_container = connect_to_cosmos(
-        env_vars["connection_string"],
-        env_vars["extracted_data_database_name"],
-        env_vars["extracted_data_container_name"],
-    )
-
-    print("✅ Cosmos DB containers connected successfully")
+    # Initialise Postgres (creates tables on first run; safe to call repeatedly)
+    try:
+        connect_to_db()
+        print("✅ Postgres connection initialised and schema ensured")
+    except Exception as e:
+        logger.error(f"⚠️  Failed to initialise Postgres: {e}")
+        # Don't crash startup - bot can still respond, persistence will retry per-call
 
     # Function to handle per-user session history with metadata tracking
     def get_history(session_id):
@@ -253,21 +245,18 @@ def format_examples_and_communication(examples_text, communication_text):
     return formatted_examples, formatted_communication
 
 
-def _run_background_extraction(conv_container, ext_container, session_id, messages, metadata=None):
-    """Run extraction + Cosmos DB upload in a background thread."""
-    from cosmosdb import send_conversation_to_cosmos, send_extracted_data
+def _run_background_extraction(session_id, messages, metadata=None):
+    """Run extraction + Postgres upsert in a background thread."""
     try:
-        # Upload raw conversation
-        if conv_container is not None:
-            send_conversation_to_cosmos(conv_container, session_id, messages)
+        # Persist raw conversation
+        save_conversation(session_id, messages)
 
-        # Extract insights and upload
-        if ext_container is not None:
-            extraction_result = asyncio.run(
-                extract_with_retry(session_id, messages, session_metadata=metadata)
-            )
-            send_extracted_data(ext_container, session_id, extraction_result, session_metadata=metadata)
-            logger.info(f"✅ Background extraction completed for session {session_id}")
+        # Extract insights and persist
+        extraction_result = asyncio.run(
+            extract_with_retry(session_id, messages, session_metadata=metadata)
+        )
+        save_extraction(session_id, extraction_result, session_metadata=metadata)
+        logger.info(f"✅ Background extraction completed for session {session_id}")
     except Exception as e:
         logger.error(f"❌ Background extraction failed for {session_id}: {e}")
 
@@ -297,7 +286,7 @@ async def chat(session_id, user_input):
                 print(f"🚀 Starting background extraction thread for session {session_id}")
                 thread = threading.Thread(
                     target=_run_background_extraction,
-                    args=(conv_container, ext_container, session_id, messages_copy, metadata_copy),
+                    args=(session_id, messages_copy, metadata_copy),
                     daemon=True
                 )
                 thread.start()

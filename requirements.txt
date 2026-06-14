@@ -21,4 +21,5 @@ python.bidi
 openpyxl
 azure-communication-messages
 azure-eventgrid
-azure-cosmos
+# Postgres (replaces azure-cosmos). [binary] bundles libpq so no system install needed.
+psycopg[binary]>=3.1

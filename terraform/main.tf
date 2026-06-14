@@ -56,6 +56,13 @@ module "app_service" {
   azure_openai_api_version    = var.azure_openai_api_version
   azure_openai_deployment_name = module.azure_openai.gpt4_deployment_name
 
+  # PostgreSQL (passwordless via managed identity)
+  # Database name, port, sslmode and USE_AAD live in config.py / PostgresConfig
+  # — only deployment-specific values are pushed as App Settings.
+  postgres_host              = module.postgres.fqdn
+  postgres_user              = module.managed_identity_app_service.identity_name
+  managed_identity_client_id = module.managed_identity_app_service.identity_client_id
+
   # Networking configuration
   virtual_network_subnet_id = module.virtual_network.subnet_id
 
@@ -73,7 +80,7 @@ module "app_service" {
     ENVIRONMENT = var.environment
   }
 
-  depends_on = [module.resource_group, module.azure_bot, module.azure_openai, module.virtual_network, module.managed_identity_bot]
+  depends_on = [module.resource_group, module.azure_bot, module.azure_openai, module.virtual_network, module.managed_identity_bot, module.managed_identity_app_service, module.postgres]
 }
 
 module "azure_openai" {
@@ -99,6 +106,42 @@ module "cosmosdb" {
 
   depends_on = [module.resource_group]
 }
+
+# -----------------------------------------------------------------------------
+# Azure Database for PostgreSQL - Flexible Server (replaces Cosmos DB)
+# Keep `module.cosmosdb` deployed during migration; remove it after data has
+# been copied over (see scripts/migrate_cosmos_to_postgres.py).
+# -----------------------------------------------------------------------------
+module "postgres" {
+  source = "./postgres"
+
+  server_name         = var.postgres_server_name
+  resource_group_name = module.resource_group.resource_group_name
+  location            = var.postgres_location
+  tenant_id           = data.azurerm_client_config.current.tenant_id
+  database_name       = var.postgres_database_name
+  sku_name            = var.postgres_sku_name
+  storage_mb          = var.postgres_storage_mb
+  zone                = var.postgres_zone
+
+  # Wire the App Service managed identity as Entra admin so the bot can connect
+  # without any password.
+  app_service_identity_principal_id = module.managed_identity_app_service.identity_principal_id
+  # Use the root variable (known at plan time) instead of the module output
+  # (resource attribute, unknown until apply) so the count gate works.
+  app_service_identity_name         = var.app_service_identity_name
+
+  # Optional human admin (set in tfvars if you want psql access)
+  entra_admin_object_id      = var.postgres_entra_admin_object_id
+  entra_admin_principal_name = var.postgres_entra_admin_principal_name
+
+  firewall_rules = var.postgres_firewall_rules
+  tags           = var.tags
+
+  depends_on = [module.resource_group, module.managed_identity_app_service]
+}
+
+data "azurerm_client_config" "current" {}
 
 module "communication_service" {
   source = "./communication_service"

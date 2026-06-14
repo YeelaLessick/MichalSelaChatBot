@@ -129,3 +129,24 @@ variable "managed_identity_id" {
   type        = string
   default     = null
 }
+
+# PostgreSQL connection settings (passwordless via managed identity)
+# Constants (port, db name, sslmode, USE_AAD) live in config.py / PostgresConfig
+# so they don't need to be plumbed through Terraform.
+variable "postgres_host" {
+  description = "Postgres FQDN (Flexible Server)"
+  type        = string
+  default     = null
+}
+
+variable "postgres_user" {
+  description = "Postgres login name. With Entra ID this is the managed identity's name."
+  type        = string
+  default     = null
+}
+
+variable "managed_identity_client_id" {
+  description = "Client ID of the user-assigned managed identity (used by azure-identity to pick the right MI)"
+  type        = string
+  default     = null
+}

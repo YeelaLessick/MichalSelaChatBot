@@ -66,8 +66,6 @@ def session_cleanup_job():
             cleaned_count = cleanup_expired_sessions(
                 session_storage,
                 CONFIG.SESSION_TIMEOUT_MINUTES,
-                conv_container=michal_sela_chatbot.conv_container,
-                ext_container=michal_sela_chatbot.ext_container,
             )
             
             # Get stats after cleanup

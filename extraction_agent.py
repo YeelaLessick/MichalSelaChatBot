@@ -16,6 +16,7 @@ from config import (
     REFERRED_TO_OPTIONS,
     YES_NO_OPTIONS,
     URGENCY_LEVEL_OPTIONS,
+    MULTI_VALUE_FIELDS,
 )
 
 # Load environment variables
@@ -66,25 +67,28 @@ async def extract_conversation_insights(session_id: str, messages: List[BaseMess
 אם שדה לא רלוונטי או לא נמצא בשיחה, השתמשי בערך null.
 
 שדות לחילוץ:
-- "נושא הפניה": [{_fmt(INQUIRY_SUBJECT_OPTIONS)}]
+- "נושא הפניה" (מערך — ניתן לבחור מספר ערכים): [{_fmt(INQUIRY_SUBJECT_OPTIONS)}]
 - "גיל הפונה": [{_fmt(CALLER_AGE_RANGE_OPTIONS)}]
 - "מין הפונה": [{_fmt(CALLER_GENDER_OPTIONS)}]
 - "קרבה לגורם המאיים או לשורדת האלימות": [{_fmt(RELATIONSHIP_OPTIONS)}]
-- "לאן הפנינו": [{_fmt(REFERRED_TO_OPTIONS)}]
+- "לאן הפנינו" (מערך — ניתן לבחור מספר ערכים): [{_fmt(REFERRED_TO_OPTIONS)}]
 - "האם פנתה לאן שהפנינו": [{_fmt(YES_NO_OPTIONS)}]
 - "האם קיבלה מענה טוב": [{_fmt(YES_NO_OPTIONS)}]
 - "האם היא רוצה שנציג אנושי יחזור אליה": [{_fmt(YES_NO_OPTIONS)}]
 - "רמת דחיפות": [{_fmt(URGENCY_LEVEL_OPTIONS)}]
 
-חשוב מאוד: הערכים חייבים להיות **בדיוק** כפי שמופיעים ברשימה. אל תשני ניסוח, אל תוסיפי מילים.
+חשוב מאוד:
+1. הערכים חייבים להיות **בדיוק** כפי שמופיעים ברשימה. אל תשני ניסוח, אל תוסיפי מילים.
+2. שדות מסומנים "מערך" — החזירי רשימה (array) גם אם יש ערך אחד בלבד, לדוגמה: ["ערך1", "ערך2"].
+   אם אין ערך, החזירי null.
 
 החזירי JSON בלבד:
 {{{{
-    "נושא הפניה": "...",
+    "נושא הפניה": ["...", "..."],
     "גיל הפונה": "...",
     "מין הפונה": "...",
     "קרבה לגורם המאיים או לשורדת האלימות": "...",
-    "לאן הפנינו": "...",
+    "לאן הפנינו": ["...", "..."],
     "האם פנתה לאן שהפנינו": "...",
     "האם קיבלה מענה טוב": "...",
     "האם היא רוצה שנציג אנושי יחזור אליה": "...",
@@ -124,7 +128,18 @@ async def extract_conversation_insights(session_id: str, messages: List[BaseMess
                 extracted_data = {}
                 for hebrew_key, value in hebrew_data.items():
                     english_key = FIELD_NAME_MAPPING.get(hebrew_key, hebrew_key)
-                    extracted_data[english_key] = value
+                    # Normalise multi-value fields: ensure they are always lists
+                    if english_key in MULTI_VALUE_FIELDS:
+                        if value is None:
+                            extracted_data[english_key] = []
+                        elif isinstance(value, str):
+                            extracted_data[english_key] = [value]
+                        elif isinstance(value, list):
+                            extracted_data[english_key] = value
+                        else:
+                            extracted_data[english_key] = [str(value)]
+                    else:
+                        extracted_data[english_key] = value
                     
             except json.JSONDecodeError:
                 # If not valid JSON, store as raw text

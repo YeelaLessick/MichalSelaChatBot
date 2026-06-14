@@ -30,6 +30,17 @@ cosmosdb_name           = "michalsela-cosmos-dev"
 cosmosdb_enable_free_tier = false
 cosmosdb_ip_range_filter = ""
 
+# PostgreSQL Flexible Server (replaces Cosmos DB - ~$13/mo on B_Standard_B1ms)
+postgres_server_name   = "michalsela-pg-dev"
+postgres_location      = "westeurope"
+postgres_database_name = "chatbot"
+postgres_sku_name      = "B_Standard_B1ms"
+postgres_storage_mb    = 32768
+# Optional: set to your Entra user object ID for psql access
+# postgres_entra_admin_object_id      = "00000000-0000-0000-0000-000000000000"
+# postgres_entra_admin_principal_name = "you@example.com"
+postgres_firewall_rules = {}
+
 # Communication Service
 communication_service_name = "michalsela-communication-dev"
 communication_data_location = "Europe"
