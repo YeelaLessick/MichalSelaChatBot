@@ -43,3 +43,7 @@ terraform.tfstate.backup
 *.so
 *.dylib
 *.pyd
+
+node_modules/
+package-lock.json
+.streamlit/secrets.toml

@@ -14,9 +14,9 @@ from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_openai import AzureChatOpenAI
 import asyncio
-from cosmosdb import is_end_conversation_message, connect_to_cosmos
-from session_manager import persist_session_data
+from cosmosdb import is_end_conversation_message, send_conversation_to_cosmos, send_extracted_data, connect_to_cosmos
 from datetime import datetime, timedelta
+from extraction_agent import extract_with_retry
 
 import logging
 import traceback
@@ -135,13 +135,25 @@ def setup_chatbot():
         current_time = datetime.now()
         
         if session_id not in session_storage:
+            # Derive channel and phone from session_id
+            if session_id.startswith("whatsapp_"):
+                channel = "whatsapp"
+                # Format is whatsapp_{phone}_{uuid8}; strip prefix then drop optional uuid suffix
+                raw = session_id[len("whatsapp_"):]
+                phone_number = raw.rsplit("_", 1)[0] if "_" in raw else raw
+            else:
+                channel = "bot_framework"
+                phone_number = None
+
             # Create new session with metadata
             session_storage[session_id] = {
                 "history": InMemoryHistory(),
                 "created_at": current_time,
-                "last_modified": current_time
+                "last_modified": current_time,
+                "channel": channel,
+                "phone_number": phone_number,
             }
-            logger.info(f"📝 New session created: {session_id}")
+            logger.info(f"📝 New session created: {session_id} (channel={channel})")
         else:
             # Update last_modified timestamp on access
             session_storage[session_id]["last_modified"] = current_time
@@ -240,6 +252,26 @@ def format_examples_and_communication(examples_text, communication_text):
 
     return formatted_examples, formatted_communication
 
+
+def _run_background_extraction(conv_container, ext_container, session_id, messages, metadata=None):
+    """Run extraction + Cosmos DB upload in a background thread."""
+    from cosmosdb import send_conversation_to_cosmos, send_extracted_data
+    try:
+        # Upload raw conversation
+        if conv_container is not None:
+            send_conversation_to_cosmos(conv_container, session_id, messages)
+
+        # Extract insights and upload
+        if ext_container is not None:
+            extraction_result = asyncio.run(
+                extract_with_retry(session_id, messages, session_metadata=metadata)
+            )
+            send_extracted_data(ext_container, session_id, extraction_result, session_metadata=metadata)
+            logger.info(f"✅ Background extraction completed for session {session_id}")
+    except Exception as e:
+        logger.error(f"❌ Background extraction failed for {session_id}: {e}")
+
+
 async def chat(session_id, user_input):
     """Handles a chat request using the session-specific chatbot."""
     try:
@@ -250,29 +282,32 @@ async def chat(session_id, user_input):
 
         if is_end_conversation_message(user_input):
             session_data = session_storage.get(session_id)
-            if session_data and len(session_data["history"].messages) > 0:
-                logger.info(f"Conversation end detected for session {session_id}, "
-                            f"messages: {len(session_data['history'].messages)}")
-                # Run persist_session_data in a background thread so we
-                # return a response to the user immediately.
+            history = session_data["history"] if session_data else None
+            print(f"conversation end detected for session {session_id}, messages count: {len(history.messages) if history else 0}")
+            if history and len(history.messages) > 0:
+                # Make a copy of messages before launching background thread,
+                # since session storage may be cleaned up.
+                messages_copy = list(history.messages)
+                metadata_copy = {
+                    "created_at": session_data.get("created_at"),
+                    "last_modified": session_data.get("last_modified"),
+                    "channel": session_data.get("channel", "unknown"),
+                    "phone_number": session_data.get("phone_number"),
+                }
+                print(f"🚀 Starting background extraction thread for session {session_id}")
                 thread = threading.Thread(
-                    target=persist_session_data,
-                    args=(
-                        session_id,
-                        session_data["history"],
-                        {
-                            "created_at": session_data.get("created_at"),
-                            "last_modified": session_data.get("last_modified"),
-                        },
-                    ),
-                    kwargs={
-                        "conv_container": conv_container,
-                        "ext_container": ext_container,
-                    },
-                    daemon=True,
+                    target=_run_background_extraction,
+                    args=(conv_container, ext_container, session_id, messages_copy, metadata_copy),
+                    daemon=True
                 )
                 thread.start()
 
+            # Delete session from memory, same as the background cleanup job does
+            if session_id in session_storage:
+                del session_storage[session_id]
+                logger.info(f"🗑️  Session deleted on end: {session_id}")
+
+            # Return response to user immediately
             return "השיחה הסתיימה. תודה שפנית אלינו."
 
         response = await chatbot.ainvoke(
