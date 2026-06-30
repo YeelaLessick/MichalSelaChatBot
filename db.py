@@ -32,6 +32,7 @@ import json
 import logging
 import threading
 import time
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 
 import psycopg
@@ -181,6 +182,27 @@ def messages_to_json(messages):
     return serialized
 
 
+def _to_json_compatible(value):
+    """Recursively convert values to JSON-serializable structures."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc).isoformat()
+        return value.isoformat()
+
+    if isinstance(value, Mapping):
+        # JSON object keys must be strings.
+        return {str(k): _to_json_compatible(v) for k, v in value.items()}
+
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [_to_json_compatible(v) for v in value]
+
+    # Fallback for uncommon types (UUID, Enum, Decimal, custom objects).
+    return str(value)
+
+
 # --- Public write operations -------------------------------------------------
 
 
@@ -212,6 +234,8 @@ def save_extraction(session_id: str, extraction_data, session_metadata=None) -> 
     meta.setdefault("extraction_timestamp", datetime.now(timezone.utc).isoformat())
     meta.setdefault("original_session_id", session_id)
     meta.setdefault("channel", meta.get("channel", "unknown"))
+    extraction_payload = _to_json_compatible(extraction_data)
+    metadata_payload = _to_json_compatible(meta)
 
     try:
         with _connect() as conn:
@@ -224,7 +248,7 @@ def save_extraction(session_id: str, extraction_data, session_metadata=None) -> 
                         SET extraction = EXCLUDED.extraction,
                             metadata   = EXCLUDED.metadata
                     """,
-                    (session_id, Json(extraction_data), Json(meta)),
+                    (session_id, Json(extraction_payload), Json(metadata_payload)),
                 )
             conn.commit()
         logger.info("✅ Extraction stored for session %s", session_id)
