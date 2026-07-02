@@ -618,5 +618,5 @@ with st.expander("Show raw data table", expanded=False):
 st.markdown("---")
 st.caption(
     f"Dashboard last refreshed: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} · "
-    f"Data source: Cosmos DB ({EXT_DATABASE}/{EXT_CONTAINER})"
+    f"Data source: Postgres ({PG_DB}@{PG_HOST})"
 )
