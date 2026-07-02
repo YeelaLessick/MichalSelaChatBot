@@ -33,11 +33,27 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 
 def _get_secret(st_key: str, env_key: str, default: str = "") -> str:
-    """Read from st.secrets (Streamlit Cloud) first, fall back to env var."""
+    """Resolve config from Streamlit secrets first, then env vars.
+
+    Supported Streamlit secrets layouts:
+    1) [postgres] block with short keys (host, user, ...)
+    2) top-level env-style keys (POSTGRES_HOST, POSTGRES_USER, ...)
+    3) top-level short keys (host, user, ...)
+    """
     try:
-        return st.secrets["postgres"][st_key]
-    except (KeyError, FileNotFoundError):
-        return os.getenv(env_key, default)
+        postgres_block = st.secrets.get("postgres", {})
+        if st_key in postgres_block:
+            return str(postgres_block[st_key])
+
+        if env_key in st.secrets:
+            return str(st.secrets[env_key])
+
+        if st_key in st.secrets:
+            return str(st.secrets[st_key])
+    except (KeyError, FileNotFoundError, AttributeError):
+        pass
+
+    return os.getenv(env_key, default)
 
 
 PG_HOST     = _get_secret("host",     "POSTGRES_HOST")
@@ -47,6 +63,19 @@ PG_USER     = _get_secret("user",     "POSTGRES_USER")
 PG_PASSWORD = _get_secret("password", "POSTGRES_PASSWORD")
 PG_SSLMODE  = _get_secret("sslmode",  "POSTGRES_SSLMODE", "require")
 USE_AAD     = _get_secret("use_aad",  "POSTGRES_USE_AAD", "").lower() in ("1", "true", "yes")
+
+
+def _get_azure_secret(key: str, default: str = "") -> str:
+    """Resolve Azure auth values from st.secrets or environment variables."""
+    try:
+        azure_block = st.secrets.get("azure", {})
+        if key in azure_block:
+            return str(azure_block[key])
+        if key in st.secrets:
+            return str(st.secrets[key])
+    except (KeyError, FileNotFoundError, AttributeError):
+        pass
+    return os.getenv(key, default)
 
 # ---------------------------------------------------------------------------
 # Postgres helpers (with AAD token caching)
@@ -64,9 +93,26 @@ def _get_aad_token() -> str:
         if cached and _token_cache["expires_at"] - now > 300:
             return cached
         from azure.identity import DefaultAzureCredential
-        cred = DefaultAzureCredential(
-            managed_identity_client_id=os.environ.get("AZURE_CLIENT_ID")
-        )
+
+        tenant_id = _get_azure_secret("AZURE_TENANT_ID")
+        client_id = _get_azure_secret("AZURE_CLIENT_ID")
+        client_secret = _get_azure_secret("AZURE_CLIENT_SECRET")
+
+        # Streamlit Cloud doesn't provide Managed Identity. Prefer explicit
+        # service-principal credentials when supplied in secrets.
+        if tenant_id and client_id and client_secret:
+            from azure.identity import ClientSecretCredential
+
+            cred = ClientSecretCredential(
+                tenant_id=tenant_id,
+                client_id=client_id,
+                client_secret=client_secret,
+            )
+        else:
+            cred = DefaultAzureCredential(
+                managed_identity_client_id=client_id or None
+            )
+
         access = cred.get_token(_AAD_SCOPE)
         _token_cache["token"] = access.token
         _token_cache["expires_at"] = float(access.expires_on)
@@ -142,8 +188,6 @@ def load_extractions() -> pd.DataFrame:
                 "caller_gender":        fields.get("caller_gender"),
                 "relationship_to_threat": fields.get("relationship_to_threat"),
                 "referred_to":          fields.get("referred_to"),
-                "contacted_referral":   fields.get("contacted_referral"),
-                "received_good_response": fields.get("received_good_response"),
                 "wants_human_callback": fields.get("wants_human_callback"),
                 "urgency_level":        fields.get("urgency_level"),
             })
@@ -269,6 +313,13 @@ channels = df["channel"].dropna().unique().tolist()
 if channels:
     selected_channels = st.sidebar.multiselect("Channel", channels, default=channels)
     df = df[df["channel"].isin(selected_channels)]
+
+# Phone number search (partial match)
+phone_query = st.sidebar.text_input("Phone number", value="").strip()
+if phone_query and "phone_number" in df.columns:
+    df = df[
+        df["phone_number"].fillna("").astype(str).str.contains(phone_query, case=False, regex=False)
+    ]
 
 # Refresh button
 if st.sidebar.button("🔄 Refresh Data"):
@@ -445,7 +496,6 @@ else:
 # Referrals
 # ---------------------------------------------------------------------------
 st.header("🔗 Referral Analysis")
-col_r1, col_r2 = st.columns(2)
 
 # Where referred
 referred_values = _explode_multi(df, "referred_to")
@@ -462,47 +512,15 @@ if not referred_counts.empty:
         color_discrete_sequence=["#1abc9c"],
     )
     fig_referred.update_layout(yaxis=dict(autorange="reversed"))
-    col_r1.plotly_chart(fig_referred, use_container_width=True)
+    st.plotly_chart(fig_referred, use_container_width=True)
 else:
-    col_r1.info("No referral data available")
-
-# Contacted referral
-df["contacted_referral_norm"] = df["contacted_referral"].apply(normalise_yesno)
-contacted_counts = df["contacted_referral_norm"].dropna().value_counts().reset_index()
-contacted_counts.columns = ["contacted", "count"]
-if not contacted_counts.empty:
-    fig_contacted = px.pie(
-        contacted_counts,
-        values="count",
-        names="contacted",
-        title="Contacted Referral? (האם פנתה לאן שהפנינו)",
-        color_discrete_sequence=["#2ecc71", "#e74c3c", "#95a5a6"],
-    )
-    col_r2.plotly_chart(fig_contacted, use_container_width=True)
-else:
-    col_r2.info("No contacted-referral data available")
+    st.info("No referral data available")
 
 # ---------------------------------------------------------------------------
 # Outcome Metrics
 # ---------------------------------------------------------------------------
 st.header("✅ Outcome Metrics")
-col_o1, col_o2 = st.columns(2)
-
-# Received good response
-df["good_response_norm"] = df["received_good_response"].apply(normalise_yesno)
-good_counts = df["good_response_norm"].dropna().value_counts().reset_index()
-good_counts.columns = ["response", "count"]
-if not good_counts.empty:
-    fig_good = px.pie(
-        good_counts,
-        values="count",
-        names="response",
-        title="Received Good Response? (האם קיבלה מענה טוב)",
-        color_discrete_sequence=["#2ecc71", "#e74c3c", "#95a5a6"],
-    )
-    col_o1.plotly_chart(fig_good, use_container_width=True)
-else:
-    col_o1.info("No response quality data available")
+col_o1 = st.columns(1)[0]
 
 # Wants human callback
 df["callback_norm"] = df["wants_human_callback"].apply(normalise_yesno)
@@ -516,9 +534,9 @@ if not callback_counts.empty:
         title="Wants Human Callback? (האם רוצה שנציג יחזור)",
         color_discrete_sequence=["#3498db", "#e67e22", "#95a5a6"],
     )
-    col_o2.plotly_chart(fig_callback, use_container_width=True)
+    col_o1.plotly_chart(fig_callback, use_container_width=True)
 else:
-    col_o2.info("No callback data available")
+    col_o1.info("No callback data available")
 
 # ---------------------------------------------------------------------------
 # Urgency & Conversation Duration
@@ -593,8 +611,6 @@ with st.expander("Show raw data table", expanded=False):
         "caller_gender",
         "relationship_to_threat",
         "referred_to",
-        "contacted_referral",
-        "received_good_response",
         "wants_human_callback",
         "has_error",
     ]
