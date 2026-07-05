@@ -13,6 +13,7 @@ import sys
 import time
 import threading
 import io
+import hmac
 import calendar
 import streamlit as st
 import pandas as pd
@@ -110,6 +111,60 @@ def _get_cost_secret(key: str, env_key: str, default: str = "") -> str:
             return val
 
     return os.getenv(env_key, default)
+
+
+def _get_auth_secret(key: str, env_key: str, default: str = "") -> str:
+    """Resolve dashboard auth config from [auth] secrets, top-level secrets, then env."""
+    try:
+        auth_block = st.secrets.get("auth", {})
+        lookup_keys = [key, key.lower(), key.upper(), env_key, env_key.lower(), env_key.upper()]
+
+        for lk in lookup_keys:
+            if lk in auth_block:
+                return str(auth_block[lk])
+
+        for lk in lookup_keys:
+            if lk in st.secrets:
+                return str(st.secrets[lk])
+    except (KeyError, FileNotFoundError, AttributeError):
+        pass
+
+    env_lookup = [env_key, env_key.lower(), env_key.upper()]
+    for ek in env_lookup:
+        val = os.getenv(ek)
+        if val:
+            return val
+
+    return default
+
+
+def require_dashboard_password() -> None:
+    """Block the dashboard until the configured password is provided."""
+    expected_password = _get_auth_secret("password", "DASHBOARD_PASSWORD")
+
+    if not expected_password:
+        st.error(
+            "Dashboard password is not configured. Add [auth].password or DASHBOARD_PASSWORD."
+        )
+        st.stop()
+
+    if st.session_state.get("dashboard_authenticated"):
+        return
+
+    st.title("🔒 Dashboard Locked")
+    st.caption("Enter the dashboard password to continue.")
+
+    with st.form("dashboard-login"):
+        password_input = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Unlock Dashboard")
+
+    if submitted:
+        if hmac.compare_digest(password_input, expected_password):
+            st.session_state["dashboard_authenticated"] = True
+            st.rerun()
+        st.error("Incorrect password.")
+
+    st.stop()
 
 # ---------------------------------------------------------------------------
 # Postgres helpers (with AAD token caching)
@@ -353,25 +408,69 @@ def load_extractions() -> pd.DataFrame:
 
 @st.cache_data(ttl=300)
 def load_conversations() -> pd.DataFrame:
-    """Fetch conversation metadata (message counts) from Postgres."""
+    """Fetch conversations plus metadata from Postgres."""
     try:
         with _connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
                     SELECT
-                        session_id,
-                        jsonb_array_length(conversation) AS msg_count
-                    FROM conversations
+                        c.session_id,
+                        c.conversation,
+                        c.updated_at,
+                        jsonb_array_length(c.conversation) AS msg_count,
+                        COALESCE(e.metadata->>'channel', 'unknown') AS channel,
+                        e.metadata->>'phone_number' AS phone_number,
+                        COALESCE(
+                            (e.extraction->>'extraction_timestamp')::timestamptz,
+                            (e.metadata->>'extraction_timestamp')::timestamptz,
+                            e.created_at,
+                            c.updated_at
+                        ) AS extraction_timestamp
+                    FROM conversations c
+                    LEFT JOIN extractions e
+                        ON e.session_id = c.session_id
+                    ORDER BY c.updated_at DESC
                     """
                 )
                 rows = cur.fetchall()
         if not rows:
             return pd.DataFrame()
-        return pd.DataFrame(rows)
+        df_conv = pd.DataFrame(rows)
+        for col in ["updated_at", "extraction_timestamp"]:
+            if col in df_conv.columns:
+                df_conv[col] = pd.to_datetime(df_conv[col], errors="coerce", utc=True)
+        return df_conv
     except Exception as e:
         st.error(f"Error loading conversations: {e}")
         return pd.DataFrame()
+
+
+def _conversation_to_rows(conversation) -> pd.DataFrame:
+    """Expand a stored conversation JSON array into displayable table rows."""
+    if not isinstance(conversation, list):
+        return pd.DataFrame()
+
+    rows = []
+    for index, msg in enumerate(conversation, start=1):
+        if isinstance(msg, dict):
+            rows.append(
+                {
+                    "message_index": index,
+                    "type": str(msg.get("type", "unknown")),
+                    "content": str(msg.get("content", "")),
+                }
+            )
+        else:
+            rows.append(
+                {
+                    "message_index": index,
+                    "type": "unknown",
+                    "content": str(msg),
+                }
+            )
+
+    return pd.DataFrame(rows)
 
 
 def _explode_multi(df: pd.DataFrame, col: str) -> pd.Series:
@@ -407,6 +506,8 @@ st.set_page_config(
     page_icon="💜",
     layout="wide",
 )
+
+require_dashboard_password()
 
 st.title("💜 Michal Sela Chatbot – Extraction Statistics")
 st.caption("Live statistics from conversation extractions stored in Postgres")
@@ -461,6 +562,10 @@ if phone_query and "phone_number" in df.columns:
 # Refresh button
 if st.sidebar.button("🔄 Refresh Data"):
     st.cache_data.clear()
+    st.rerun()
+
+if st.sidebar.button("🔒 Lock Dashboard"):
+    st.session_state.pop("dashboard_authenticated", None)
     st.rerun()
 
 st.sidebar.markdown("---")
@@ -839,6 +944,66 @@ with st.expander("Show raw data table", expanded=False):
         width="stretch",
         hide_index=True,
     )
+
+# ---------------------------------------------------------------------------
+# Full Conversation Viewer
+# ---------------------------------------------------------------------------
+st.header("💬 Full Conversations")
+with st.expander("Show full conversations", expanded=False):
+    conversations_df = load_conversations()
+
+    if conversations_df.empty:
+        st.info("No stored conversations found.")
+    else:
+        visible_session_ids = set(df["session_id"].dropna().astype(str))
+        filtered_conversations = conversations_df[
+            conversations_df["session_id"].astype(str).isin(visible_session_ids)
+        ].copy()
+
+        if filtered_conversations.empty:
+            st.info("No conversations match the current filters.")
+        else:
+            summary_cols = [
+                "session_id",
+                "extraction_timestamp",
+                "updated_at",
+                "channel",
+                "phone_number",
+                "msg_count",
+            ]
+            available_summary_cols = [c for c in summary_cols if c in filtered_conversations.columns]
+            st.dataframe(
+                filtered_conversations[available_summary_cols],
+                width="stretch",
+                hide_index=True,
+            )
+
+            session_options = filtered_conversations["session_id"].astype(str).tolist()
+            selected_session = st.selectbox(
+                "Select a session to inspect",
+                options=session_options,
+            )
+
+            selected_match = filtered_conversations[
+                filtered_conversations["session_id"].astype(str) == selected_session
+            ]
+            selected_row = selected_match.iloc[0]
+
+            st.caption(
+                f"Channel: {selected_row.get('channel') or 'unknown'} · "
+                f"Phone: {selected_row.get('phone_number') or '-'} · "
+                f"Messages: {selected_row.get('msg_count', 0)}"
+            )
+
+            message_df = _conversation_to_rows(selected_row.get("conversation"))
+            if message_df.empty:
+                st.info("This session does not contain any stored messages.")
+            else:
+                st.dataframe(
+                    message_df,
+                    width="stretch",
+                    hide_index=True,
+                )
 
 # ---------------------------------------------------------------------------
 # Footer
