@@ -12,6 +12,8 @@ import os
 import sys
 import time
 import threading
+import io
+import calendar
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -77,6 +79,19 @@ def _get_azure_secret(key: str, default: str = "") -> str:
         pass
     return os.getenv(key, default)
 
+
+def _get_cost_secret(key: str, env_key: str, default: str = "") -> str:
+    """Resolve cost-export config from [cost] secrets, top-level secrets, then env."""
+    try:
+        cost_block = st.secrets.get("cost", {})
+        if key in cost_block:
+            return str(cost_block[key])
+        if env_key in st.secrets:
+            return str(st.secrets[env_key])
+    except (KeyError, FileNotFoundError, AttributeError):
+        pass
+    return os.getenv(env_key, default)
+
 # ---------------------------------------------------------------------------
 # Postgres helpers (with AAD token caching)
 # ---------------------------------------------------------------------------
@@ -137,6 +152,102 @@ def _connect() -> psycopg.Connection:
         connect_timeout=10,
         row_factory=dict_row,
     )
+
+
+def _get_azure_credential():
+    """Create an Azure credential for Blob access.
+
+    Streamlit Cloud should use service principal credentials from secrets.
+    """
+    from azure.identity import ClientSecretCredential, DefaultAzureCredential
+
+    tenant_id = _get_azure_secret("AZURE_TENANT_ID")
+    client_id = _get_azure_secret("AZURE_CLIENT_ID")
+    client_secret = _get_azure_secret("AZURE_CLIENT_SECRET")
+
+    if tenant_id and client_id and client_secret:
+        return ClientSecretCredential(
+            tenant_id=tenant_id,
+            client_id=client_id,
+            client_secret=client_secret,
+        )
+
+    return DefaultAzureCredential(managed_identity_client_id=client_id or None)
+
+
+@st.cache_data(ttl=1800)
+def load_cost_export() -> pd.DataFrame:
+    """Load Azure Cost Management export CSV files from Blob Storage."""
+    account = _get_cost_secret("storage_account", "COST_STORAGE_ACCOUNT")
+    container = _get_cost_secret("container", "COST_CONTAINER", "cost-exports")
+    directory = _get_cost_secret("directory", "COST_DIRECTORY", "cost/daily")
+
+    if not account:
+        return pd.DataFrame()
+
+    try:
+        from azure.storage.blob import BlobServiceClient
+
+        account_url = f"https://{account}.blob.core.windows.net"
+        blob_service = BlobServiceClient(account_url=account_url, credential=_get_azure_credential())
+        container_client = blob_service.get_container_client(container)
+
+        blobs = list(container_client.list_blobs(name_starts_with=directory))
+        if not blobs:
+            return pd.DataFrame()
+
+        # Load newest files first and cap to avoid heavy dashboard startup.
+        blobs = sorted(blobs, key=lambda b: b.last_modified or datetime.min.replace(tzinfo=timezone.utc), reverse=True)[:20]
+
+        frames = []
+        for blob in blobs:
+            if not blob.name.lower().endswith(".csv"):
+                continue
+            data = container_client.download_blob(blob.name).readall()
+            try:
+                df_blob = pd.read_csv(io.BytesIO(data))
+                if not df_blob.empty:
+                    frames.append(df_blob)
+            except Exception:
+                # Skip malformed files and continue.
+                continue
+
+        if not frames:
+            return pd.DataFrame()
+
+        return pd.concat(frames, ignore_index=True)
+    except Exception:
+        return pd.DataFrame()
+
+
+def _normalise_cost_dataframe(df_cost: pd.DataFrame) -> pd.DataFrame:
+    """Map export schema variants to a common shape: date + cost."""
+    if df_cost.empty:
+        return df_cost
+
+    date_col = next(
+        (c for c in ["Date", "UsageDate", "date", "usageDate"] if c in df_cost.columns),
+        None,
+    )
+    cost_col = next(
+        (c for c in ["CostInBillingCurrency", "PreTaxCost", "Cost", "costInBillingCurrency"] if c in df_cost.columns),
+        None,
+    )
+
+    if not date_col or not cost_col:
+        return pd.DataFrame()
+
+    out = pd.DataFrame()
+
+    # Cost export sometimes uses yyyymmdd integers in UsageDate.
+    if date_col.lower() == "usagedate":
+        out["date"] = pd.to_datetime(df_cost[date_col].astype(str), format="%Y%m%d", errors="coerce", utc=True)
+    else:
+        out["date"] = pd.to_datetime(df_cost[date_col], errors="coerce", utc=True)
+
+    out["cost"] = pd.to_numeric(df_cost[cost_col], errors="coerce").fillna(0.0)
+    out = out.dropna(subset=["date"]) 
+    return out
 
 
 @st.cache_data(ttl=300)  # cache for 5 minutes
@@ -328,6 +439,55 @@ if st.sidebar.button("🔄 Refresh Data"):
 
 st.sidebar.markdown("---")
 st.sidebar.info(f"Showing **{len(df)}** extraction records")
+
+# ---------------------------------------------------------------------------
+# Cost Overview (from Azure Cost export in Blob Storage)
+# ---------------------------------------------------------------------------
+st.header("💸 Cost Overview")
+
+cost_raw = load_cost_export()
+cost_df = _normalise_cost_dataframe(cost_raw)
+
+if cost_df.empty:
+    st.info(
+        "Cost export is not configured yet. Add Streamlit secrets under [cost]: "
+        "storage_account, container (default cost-exports), directory (default cost/daily), "
+        "and optional monthly_budget_usd."
+    )
+else:
+    now_utc = datetime.now(timezone.utc)
+    month_start = now_utc.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    month_mask = (cost_df["date"] >= month_start) & (cost_df["date"] <= now_utc)
+    mtd_df = cost_df[month_mask]
+
+    mtd_cost = float(mtd_df["cost"].sum()) if not mtd_df.empty else 0.0
+    days_elapsed = max(1, now_utc.day)
+    days_in_month = calendar.monthrange(now_utc.year, now_utc.month)[1]
+    forecast_eom = (mtd_cost / days_elapsed) * days_in_month
+
+    monthly_budget_raw = _get_cost_secret("monthly_budget_usd", "COST_MONTHLY_BUDGET_USD", "")
+    monthly_budget = float(monthly_budget_raw) if monthly_budget_raw else None
+    remaining = (monthly_budget - mtd_cost) if monthly_budget is not None else None
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("MTD Cost (USD)", f"${mtd_cost:,.2f}")
+    c2.metric("Forecast EOM (USD)", f"${forecast_eom:,.2f}")
+    c3.metric("Remaining Budget (USD)", f"${remaining:,.2f}" if remaining is not None else "-")
+
+    daily = (
+        mtd_df.assign(day=mtd_df["date"].dt.date)
+        .groupby("day", as_index=False)["cost"]
+        .sum()
+    )
+    fig_cost = px.line(
+        daily,
+        x="day",
+        y="cost",
+        markers=True,
+        title="Daily Cost Trend (MTD)",
+        labels={"day": "Date", "cost": "Cost (USD)"},
+    )
+    st.plotly_chart(fig_cost, use_container_width=True)
 
 # ---------------------------------------------------------------------------
 # KPIs – top row
