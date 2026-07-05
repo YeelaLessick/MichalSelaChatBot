@@ -584,7 +584,7 @@ if cost_df.empty:
         st.info(
             "Cost export is not configured yet. Add Streamlit secrets under [cost]: "
             "storage_account, container (default cost-exports), directory (default cost/daily), "
-            "and optional monthly_budget_usd."
+            "and optional monthly_budget_usd / annual_credit_usd."
         )
     elif cost_status == "no_blobs":
         st.warning(
@@ -612,10 +612,14 @@ if cost_df.empty:
 else:
     now_utc = datetime.now(timezone.utc)
     month_start = now_utc.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    year_start = now_utc.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
     month_mask = (cost_df["date"] >= month_start) & (cost_df["date"] <= now_utc)
+    year_mask = (cost_df["date"] >= year_start) & (cost_df["date"] <= now_utc)
     mtd_df = cost_df[month_mask]
+    ytd_df = cost_df[year_mask]
 
     mtd_cost = float(mtd_df["cost"].sum()) if not mtd_df.empty else 0.0
+    ytd_cost = float(ytd_df["cost"].sum()) if not ytd_df.empty else 0.0
     days_elapsed = max(1, now_utc.day)
     days_in_month = calendar.monthrange(now_utc.year, now_utc.month)[1]
     forecast_eom = (mtd_cost / days_elapsed) * days_in_month
@@ -623,11 +627,23 @@ else:
     monthly_budget_raw = _get_cost_secret("monthly_budget_usd", "COST_MONTHLY_BUDGET_USD", "125")
     monthly_budget = float(monthly_budget_raw) if monthly_budget_raw else 125.0
     remaining = (monthly_budget - mtd_cost) if monthly_budget is not None else None
+    annual_credit_raw = _get_cost_secret("annual_credit_usd", "COST_ANNUAL_CREDIT_USD", "")
+    annual_credit = float(annual_credit_raw) if annual_credit_raw else None
+    remaining_annual_credit = (annual_credit - ytd_cost) if annual_credit is not None else None
 
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
     c1.metric("MTD Cost (USD)", f"${mtd_cost:,.2f}")
     c2.metric("Forecast EOM (USD)", f"${forecast_eom:,.2f}")
     c3.metric("Remaining Budget (USD)", f"${remaining:,.2f}" if remaining is not None else "-")
+    c4.metric(
+        "Remaining Annual Credit (USD)",
+        f"${remaining_annual_credit:,.2f}" if remaining_annual_credit is not None else "-",
+    )
+
+    if annual_credit is not None:
+        c5, c6 = st.columns(2)
+        c5.metric("Annual Credit (USD)", f"${annual_credit:,.2f}")
+        c6.metric("YTD Cost (USD)", f"${ytd_cost:,.2f}")
 
     monthly = (
         cost_df.assign(month=cost_df["date"].dt.to_period("M").dt.to_timestamp())
