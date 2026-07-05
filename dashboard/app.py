@@ -515,8 +515,8 @@ else:
     days_in_month = calendar.monthrange(now_utc.year, now_utc.month)[1]
     forecast_eom = (mtd_cost / days_elapsed) * days_in_month
 
-    monthly_budget_raw = _get_cost_secret("monthly_budget_usd", "COST_MONTHLY_BUDGET_USD", "")
-    monthly_budget = float(monthly_budget_raw) if monthly_budget_raw else None
+    monthly_budget_raw = _get_cost_secret("monthly_budget_usd", "COST_MONTHLY_BUDGET_USD", "125")
+    monthly_budget = float(monthly_budget_raw) if monthly_budget_raw else 125.0
     remaining = (monthly_budget - mtd_cost) if monthly_budget is not None else None
 
     c1, c2, c3 = st.columns(3)
@@ -524,18 +524,20 @@ else:
     c2.metric("Forecast EOM (USD)", f"${forecast_eom:,.2f}")
     c3.metric("Remaining Budget (USD)", f"${remaining:,.2f}" if remaining is not None else "-")
 
-    daily = (
-        mtd_df.assign(day=mtd_df["date"].dt.date)
-        .groupby("day", as_index=False)["cost"]
+    monthly = (
+        cost_df.assign(month=cost_df["date"].dt.to_period("M").dt.to_timestamp())
+        .groupby("month", as_index=False)["cost"]
         .sum()
+        .sort_values("month")
+        .tail(12)
     )
     fig_cost = px.line(
-        daily,
-        x="day",
+        monthly,
+        x="month",
         y="cost",
         markers=True,
-        title="Daily Cost Trend (MTD)",
-        labels={"day": "Date", "cost": "Cost (USD)"},
+        title="Monthly Cost Trend (Last 12 Months)",
+        labels={"month": "Month", "cost": "Cost (USD)"},
     )
     st.plotly_chart(fig_cost, width="stretch")
 
