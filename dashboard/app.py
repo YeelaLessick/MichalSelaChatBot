@@ -84,12 +84,31 @@ def _get_cost_secret(key: str, env_key: str, default: str = "") -> str:
     """Resolve cost-export config from [cost] secrets, top-level secrets, then env."""
     try:
         cost_block = st.secrets.get("cost", {})
-        if key in cost_block:
-            return str(cost_block[key])
-        if env_key in st.secrets:
-            return str(st.secrets[env_key])
+        lookup_keys = [
+            key,
+            key.lower(),
+            key.upper(),
+            env_key,
+            env_key.lower(),
+            env_key.upper(),
+        ]
+
+        for lk in lookup_keys:
+            if lk in cost_block:
+                return str(cost_block[lk])
+
+        for lk in lookup_keys:
+            if lk in st.secrets:
+                return str(st.secrets[lk])
     except (KeyError, FileNotFoundError, AttributeError):
         pass
+
+    env_lookup = [env_key, env_key.lower(), env_key.upper()]
+    for ek in env_lookup:
+        val = os.getenv(ek)
+        if val:
+            return val
+
     return os.getenv(env_key, default)
 
 # ---------------------------------------------------------------------------
@@ -487,7 +506,7 @@ else:
         title="Daily Cost Trend (MTD)",
         labels={"day": "Date", "cost": "Cost (USD)"},
     )
-    st.plotly_chart(fig_cost, use_container_width=True)
+    st.plotly_chart(fig_cost, width="stretch")
 
 # ---------------------------------------------------------------------------
 # KPIs – top row
@@ -535,7 +554,7 @@ if "extraction_timestamp" in df.columns and df["extraction_timestamp"].notna().a
         color_discrete_sequence=["#9b59b6"],
     )
     fig_time.update_layout(bargap=0.2)
-    st.plotly_chart(fig_time, use_container_width=True)
+    st.plotly_chart(fig_time, width="stretch")
 
 # ---------------------------------------------------------------------------
 # Channel distribution
@@ -551,7 +570,7 @@ fig_channel = px.pie(
     names="channel",
     color_discrete_sequence=px.colors.qualitative.Set2,
 )
-col_ch1.plotly_chart(fig_channel, use_container_width=True)
+col_ch1.plotly_chart(fig_channel, width="stretch")
 
 # Channel vs average message count
 channel_msg = df.groupby("channel")["message_count"].mean().reset_index()
@@ -563,7 +582,7 @@ fig_ch_msg = px.bar(
     labels={"channel": "Channel", "avg_messages": "Avg Messages"},
     color_discrete_sequence=["#2ecc71"],
 )
-col_ch2.plotly_chart(fig_ch_msg, use_container_width=True)
+col_ch2.plotly_chart(fig_ch_msg, width="stretch")
 
 # ---------------------------------------------------------------------------
 # Demographics
@@ -582,7 +601,7 @@ if not gender_counts.empty:
         title="Caller Gender (מין הפונה)",
         color_discrete_sequence=px.colors.qualitative.Pastel,
     )
-    col_d1.plotly_chart(fig_gender, use_container_width=True)
+    col_d1.plotly_chart(fig_gender, width="stretch")
 else:
     col_d1.info("No gender data available")
 
@@ -605,7 +624,7 @@ if not age_values.empty:
         labels={"age_range": "Age Range", "count": "Count"},
         color_discrete_sequence=["#3498db"],
     )
-    col_d2.plotly_chart(fig_age, use_container_width=True)
+    col_d2.plotly_chart(fig_age, width="stretch")
 else:
     col_d2.info("No age data available")
 
@@ -630,7 +649,7 @@ if not subject_counts.empty:
         color_discrete_sequence=["#e74c3c"],
     )
     fig_subject.update_layout(yaxis=dict(autorange="reversed"))
-    col_i1.plotly_chart(fig_subject, use_container_width=True)
+    col_i1.plotly_chart(fig_subject, width="stretch")
 else:
     col_i1.info("No inquiry subject data available")
 
@@ -648,7 +667,7 @@ if not rel_counts.empty:
         color_discrete_sequence=["#f39c12"],
     )
     fig_rel.update_layout(yaxis=dict(autorange="reversed"))
-    col_i2.plotly_chart(fig_rel, use_container_width=True)
+    col_i2.plotly_chart(fig_rel, width="stretch")
 else:
     col_i2.info("No relationship data available")
 
@@ -672,7 +691,7 @@ if not referred_counts.empty:
         color_discrete_sequence=["#1abc9c"],
     )
     fig_referred.update_layout(yaxis=dict(autorange="reversed"))
-    st.plotly_chart(fig_referred, use_container_width=True)
+    st.plotly_chart(fig_referred, width="stretch")
 else:
     st.info("No referral data available")
 
@@ -694,7 +713,7 @@ if not callback_counts.empty:
         title="Wants Human Callback? (האם רוצה שנציג יחזור)",
         color_discrete_sequence=["#3498db", "#e67e22", "#95a5a6"],
     )
-    col_o1.plotly_chart(fig_callback, use_container_width=True)
+    col_o1.plotly_chart(fig_callback, width="stretch")
 else:
     col_o1.info("No callback data available")
 
@@ -730,7 +749,7 @@ if "urgency_level" in df.columns:
             },
         )
         fig_urgency.update_layout(yaxis=dict(autorange="reversed"), showlegend=False)
-        col_u1.plotly_chart(fig_urgency, use_container_width=True)
+        col_u1.plotly_chart(fig_urgency, width="stretch")
     else:
         col_u1.info("No urgency data available")
 else:
@@ -747,7 +766,7 @@ if "conversation_time" in df.columns:
             labels={"value": "Duration (min)", "count": "Count"},
             color_discrete_sequence=["#9b59b6"],
         )
-        col_u2.plotly_chart(fig_dur, use_container_width=True)
+        col_u2.plotly_chart(fig_dur, width="stretch")
     else:
         col_u2.info("No duration data available")
 else:
