@@ -194,7 +194,7 @@ def _get_azure_credential():
     return DefaultAzureCredential(managed_identity_client_id=client_id or None)
 
 
-@st.cache_data(ttl=1800)
+@st.cache_data(ttl=120)
 def load_cost_export() -> tuple[pd.DataFrame, str, dict]:
     """Load Azure Cost Management export CSV files from Blob Storage.
 
