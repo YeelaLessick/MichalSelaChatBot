@@ -195,14 +195,20 @@ def _get_azure_credential():
 
 
 @st.cache_data(ttl=1800)
-def load_cost_export() -> pd.DataFrame:
-    """Load Azure Cost Management export CSV files from Blob Storage."""
+def load_cost_export() -> tuple[pd.DataFrame, str, dict]:
+    """Load Azure Cost Management export CSV files from Blob Storage.
+
+    Returns:
+        (dataframe, status, context)
+        status in {"ok", "missing_account", "no_blobs", "error"}
+    """
     account = _get_cost_secret("storage_account", "COST_STORAGE_ACCOUNT")
     container = _get_cost_secret("container", "COST_CONTAINER", "cost-exports")
     directory = _get_cost_secret("directory", "COST_DIRECTORY", "cost/daily")
+    context = {"account": account, "container": container, "directory": directory}
 
     if not account:
-        return pd.DataFrame()
+        return pd.DataFrame(), "missing_account", context
 
     try:
         from azure.storage.blob import BlobServiceClient
@@ -213,7 +219,7 @@ def load_cost_export() -> pd.DataFrame:
 
         blobs = list(container_client.list_blobs(name_starts_with=directory))
         if not blobs:
-            return pd.DataFrame()
+            return pd.DataFrame(), "no_blobs", context
 
         # Load newest files first and cap to avoid heavy dashboard startup.
         blobs = sorted(blobs, key=lambda b: b.last_modified or datetime.min.replace(tzinfo=timezone.utc), reverse=True)[:20]
@@ -232,11 +238,12 @@ def load_cost_export() -> pd.DataFrame:
                 continue
 
         if not frames:
-            return pd.DataFrame()
+            return pd.DataFrame(), "no_blobs", context
 
-        return pd.concat(frames, ignore_index=True)
-    except Exception:
-        return pd.DataFrame()
+        return pd.concat(frames, ignore_index=True), "ok", context
+    except Exception as exc:
+        context["error"] = str(exc)
+        return pd.DataFrame(), "error", context
 
 
 def _normalise_cost_dataframe(df_cost: pd.DataFrame) -> pd.DataFrame:
@@ -464,15 +471,39 @@ st.sidebar.info(f"Showing **{len(df)}** extraction records")
 # ---------------------------------------------------------------------------
 st.header("💸 Cost Overview")
 
-cost_raw = load_cost_export()
+cost_raw, cost_status, cost_context = load_cost_export()
 cost_df = _normalise_cost_dataframe(cost_raw)
 
 if cost_df.empty:
-    st.info(
-        "Cost export is not configured yet. Add Streamlit secrets under [cost]: "
-        "storage_account, container (default cost-exports), directory (default cost/daily), "
-        "and optional monthly_budget_usd."
-    )
+    if cost_status == "missing_account":
+        st.info(
+            "Cost export is not configured yet. Add Streamlit secrets under [cost]: "
+            "storage_account, container (default cost-exports), directory (default cost/daily), "
+            "and optional monthly_budget_usd."
+        )
+    elif cost_status == "no_blobs":
+        st.warning(
+            "Cost export location is configured, but no CSV files were found yet. "
+            "This can happen before the first scheduled export run."
+        )
+        st.caption(
+            f"Checked: account={cost_context.get('account')}, "
+            f"container={cost_context.get('container')}, "
+            f"directory={cost_context.get('directory')}"
+        )
+    elif cost_status == "error":
+        st.error(
+            "Cost export is configured but could not be loaded. "
+            "Check Blob permissions for the dashboard identity (Storage Blob Data Reader)."
+        )
+        st.caption(
+            f"Checked: account={cost_context.get('account')}, "
+            f"container={cost_context.get('container')}, "
+            f"directory={cost_context.get('directory')}"
+        )
+        st.code(str(cost_context.get("error", "Unknown error")), language="text")
+    else:
+        st.info("Cost export data is not available yet.")
 else:
     now_utc = datetime.now(timezone.utc)
     month_start = now_utc.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
