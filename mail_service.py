@@ -1,4 +1,4 @@
-"""Daily email summary service for conversation extractions."""
+"""Weekly email summary service for conversation extractions."""
 
 from __future__ import annotations
 
@@ -14,24 +14,27 @@ from db import _connect
 
 logger = logging.getLogger(__name__)
 
-PRIORITY_ENDING = "נציגה תחזור"
-PRIORITY_URGENCIES = {
-    "חירום - סכנת חיים מיידית",
-    "גבוהה - מצב מסוכן",
-}
+# Order in which conversation-ending groups appear in the report.
+CONVERSATION_ENDING_ORDER = [
+    "נציגה תחזור",
+    "נטישה",
+    "שיחה הושלמה",
+]
+UNKNOWN_ENDING = "לא ידוע"
 
-URGENCY_ORDER = {
-    "חירום - סכנת חיים מיידית": 0,
-    "גבוהה - מצב מסוכן": 1,
-    "בינונית - דורש טיפול": 2,
-    "נמוכה - בקשת מידע בלבד": 3,
-}
-
-
-def _urgency_sort_key(value: str | None) -> int:
-    if not value:
-        return 99
-    return URGENCY_ORDER.get(value, 99)
+# Fields shown for every conversation, in display order (English key -> Hebrew label).
+FIELD_LABELS: list[tuple[str, str]] = [
+    ("urgency_level", "רמת דחיפות"),
+    ("inquiry_subject", "נושא הפניה"),
+    ("caller_gender", "מין הפונה"),
+    ("caller_age", "גיל הפונה"),
+    ("relationship_to_threat", "קרבה לגורם המאיים / לשורדת"),
+    ("referred_to", "לאן הפנינו"),
+    ("contacted_referral", "האם פנתה לגורם"),
+    ("received_good_response", "האם קיבלה מענה טוב"),
+    ("wants_human_callback", "רוצה שנציגה תחזור"),
+    ("conversation_time", "זמן השיחה"),
+]
 
 
 def _extract_fields(extraction: dict[str, Any] | None) -> dict[str, Any]:
@@ -43,7 +46,7 @@ def _extract_fields(extraction: dict[str, Any] | None) -> dict[str, Any]:
     return extraction
 
 
-def _format_list(value: Any) -> str:
+def _format_value(value: Any) -> str:
     if isinstance(value, list):
         values = [str(item).strip() for item in value if str(item).strip()]
         return ", ".join(values) if values else "-"
@@ -53,43 +56,36 @@ def _format_list(value: Any) -> str:
     return text if text else "-"
 
 
-def _build_row_html(item: dict[str, Any]) -> str:
+def _build_conversation_card(item: dict[str, Any]) -> str:
     fields = item["fields"]
     created_local = item["created_local"].strftime("%Y-%m-%d %H:%M")
+
+    detail_rows = "".join(
+        (
+            "<tr>"
+            f"<td style='padding:4px 10px;font-weight:bold;white-space:nowrap;'>{label}</td>"
+            f"<td style='padding:4px 10px;'>{_format_value(fields.get(key))}</td>"
+            "</tr>"
+        )
+        for key, label in FIELD_LABELS
+    )
+
     return (
-        "<tr>"
-        f"<td>{created_local}</td>"
-        f"<td>{item['session_id']}</td>"
-        f"<td>{fields.get('conversation_ending', '-')}</td>"
-        f"<td>{fields.get('urgency_level', '-')}</td>"
-        f"<td>{_format_list(fields.get('inquiry_subject'))}</td>"
-        f"<td>{_format_list(fields.get('referred_to'))}</td>"
-        f"<td>{fields.get('wants_human_callback', '-')}</td>"
-        "</tr>"
+        "<div style='border:1px solid #ccc;border-radius:6px;padding:10px;margin:10px 0;'>"
+        f"<p style='margin:0 0 6px;'><strong>מזהה שיחה:</strong> {item['session_id']} "
+        f"&nbsp;|&nbsp; <strong>תאריך:</strong> {created_local}</p>"
+        "<table style='border-collapse:collapse;width:100%;'>"
+        f"<tbody>{detail_rows}</tbody>"
+        "</table>"
+        "</div>"
     )
 
 
-def _build_table(items: list[dict[str, Any]]) -> str:
+def _build_group(items: list[dict[str, Any]]) -> str:
     if not items:
         return "<p>אין שיחות בקטגוריה זו.</p>"
+    return "".join(_build_conversation_card(item) for item in items)
 
-    rows = "".join(_build_row_html(item) for item in items)
-    return (
-        "<table border='1' cellpadding='6' cellspacing='0' style='border-collapse:collapse;width:100%;'>"
-        "<thead>"
-        "<tr>"
-        "<th>שעה</th>"
-        "<th>Session ID</th>"
-        "<th>סיום שיחה</th>"
-        "<th>רמת דחיפות</th>"
-        "<th>נושא פניה</th>"
-        "<th>הפניה</th>"
-        "<th>בקשה לנציגה</th>"
-        "</tr>"
-        "</thead>"
-        f"<tbody>{rows}</tbody>"
-        "</table>"
-    )
 
 
 def fetch_conversations_for_period(
@@ -132,64 +128,48 @@ def fetch_conversations_for_period(
     return results
 
 
-def build_daily_summary_email(
+def build_weekly_summary_email(
     rows: list[dict[str, Any]],
     report_start_local: datetime,
     report_end_local: datetime,
 ) -> str:
-    """Build HTML email grouped by requested priority rules."""
-    priority_rows: list[dict[str, Any]] = []
-    remaining_rows: list[dict[str, Any]] = []
-
+    """Build HTML email grouped by how each conversation ended."""
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for item in rows:
-        fields = item["fields"]
-        ending = fields.get("conversation_ending")
-        urgency = fields.get("urgency_level")
-        is_priority = ending == PRIORITY_ENDING or urgency in PRIORITY_URGENCIES
-        if is_priority:
-            priority_rows.append(item)
-        else:
-            remaining_rows.append(item)
+        ending = item["fields"].get("conversation_ending") or UNKNOWN_ENDING
+        grouped[ending].append(item)
 
-    priority_rows.sort(
-        key=lambda x: (_urgency_sort_key(x["fields"].get("urgency_level")), x["created_at"]),
-        reverse=False,
-    )
+    for ending in grouped:
+        grouped[ending].sort(key=lambda x: x["created_at"], reverse=True)
 
-    grouped_remaining: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for item in remaining_rows:
-        grouped_remaining[item["fields"].get("urgency_level") or "לא ידוע"].append(item)
-
-    for urgency_value in grouped_remaining:
-        grouped_remaining[urgency_value].sort(key=lambda x: x["created_at"], reverse=True)
-
-    urgency_groups = sorted(grouped_remaining.keys(), key=_urgency_sort_key)
+    # Preferred order first, then any unexpected endings, then unknown last.
+    ordered_endings = [e for e in CONVERSATION_ENDING_ORDER if e in grouped]
+    extras = [e for e in grouped if e not in CONVERSATION_ENDING_ORDER and e != UNKNOWN_ENDING]
+    ordered_endings.extend(sorted(extras))
+    if UNKNOWN_ENDING in grouped:
+        ordered_endings.append(UNKNOWN_ENDING)
 
     period_text = (
-        f"{report_start_local.strftime('%Y-%m-%d %H:%M')}"
+        f"{report_start_local.strftime('%Y-%m-%d')}"
         f" עד "
-        f"{report_end_local.strftime('%Y-%m-%d %H:%M')}"
+        f"{report_end_local.strftime('%Y-%m-%d')}"
     )
 
     html = [
-        "<html><body style='font-family:Arial,sans-serif;'>",
-        "<h2>סיכום יומי של שיחות</h2>",
+        "<html><body dir='rtl' style='font-family:Arial,sans-serif;'>",
+        "<h2>סיכום שבועי של שיחות</h2>",
         f"<p><strong>טווח הדוח:</strong> {period_text} (שעון ישראל)</p>",
         f"<p><strong>סה\"כ שיחות:</strong> {len(rows)}</p>",
-        f"<p><strong>שיחות עדיפות:</strong> {len(priority_rows)}</p>",
         "<hr/>",
-        "<h3>1) שיחות עדיפות (נציגה תחזור / דחיפות גבוהה או חירום)</h3>",
-        _build_table(priority_rows),
-        "<hr/>",
-        "<h3>2) יתר השיחות לפי רמת דחיפות</h3>",
     ]
 
-    if not urgency_groups:
-        html.append("<p>אין שיחות נוספות מעבר לשיחות העדיפות.</p>")
+    if not ordered_endings:
+        html.append("<p>לא נרשמו שיחות בשבוע החולף.</p>")
     else:
-        for urgency in urgency_groups:
-            html.append(f"<h4>{urgency}</h4>")
-            html.append(_build_table(grouped_remaining[urgency]))
+        for ending in ordered_endings:
+            items = grouped[ending]
+            html.append(f"<h3>{ending} ({len(items)})</h3>")
+            html.append(_build_group(items))
 
     html.append("</body></html>")
     return "".join(html)
@@ -207,15 +187,15 @@ def _validate_email_config() -> tuple[bool, str]:
     return True, ""
 
 
-def send_daily_conversation_summary(now_utc: datetime | None = None) -> bool:
-    """Generate and send the daily summary email via Azure Communication Services."""
+def send_weekly_conversation_summary(now_utc: datetime | None = None) -> bool:
+    """Generate and send the weekly summary email via Azure Communication Services."""
     if not EmailSummaryConfig.ENABLED:
-        logger.info("Daily summary mail is disabled.")
+        logger.info("Weekly summary mail is disabled.")
         return False
 
     ok, message = _validate_email_config()
     if not ok:
-        logger.warning("Daily summary mail skipped. %s", message)
+        logger.warning("Weekly summary mail skipped. %s", message)
         return False
 
     from zoneinfo import ZoneInfo
@@ -223,13 +203,13 @@ def send_daily_conversation_summary(now_utc: datetime | None = None) -> bool:
     local_tz = ZoneInfo(EmailSummaryConfig.TIMEZONE)
     now_utc = now_utc or datetime.now(timezone.utc)
     now_local = now_utc.astimezone(local_tz)
-    start_local = now_local - timedelta(days=1)
+    start_local = now_local - timedelta(days=7)
 
     rows = fetch_conversations_for_period(start_local.astimezone(timezone.utc), now_utc, EmailSummaryConfig.TIMEZONE)
 
-    html_body = build_daily_summary_email(rows, start_local, now_local)
+    html_body = build_weekly_summary_email(rows, start_local, now_local)
 
-    subject = f"סיכום שיחות יומי - {now_local.strftime('%Y-%m-%d')}"
+    subject = f"סיכום שיחות שבועי - {now_local.strftime('%Y-%m-%d')}"
 
     email_client = EmailClient.from_connection_string(EmailSummaryConfig.CONNECTION_STRING)
     email_message = {
@@ -248,7 +228,7 @@ def send_daily_conversation_summary(now_utc: datetime | None = None) -> bool:
 
     status = result.get("status") if isinstance(result, dict) else result
     logger.info(
-        "Daily summary mail sent to %s with %s conversations (status=%s)",
+        "Weekly summary mail sent to %s with %s conversations (status=%s)",
         EmailSummaryConfig.RECIPIENT,
         len(rows),
         status,
