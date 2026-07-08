@@ -146,6 +146,7 @@ def load_extractions() -> pd.DataFrame:
                 "received_good_response": fields.get("received_good_response"),
                 "wants_human_callback": fields.get("wants_human_callback"),
                 "urgency_level":        fields.get("urgency_level"),
+                "conversation_ending":  fields.get("conversation_ending"),
             })
 
         df = pd.DataFrame(rows)

@@ -53,6 +53,24 @@ class PostgresConfig:
     # Only used when USE_AAD is false (local dev)
     PASSWORD = os.environ.get("POSTGRES_PASSWORD")
 
+
+class EmailSummaryConfig:
+    """Daily email summary configuration."""
+
+    ENABLED = os.environ.get("DAILY_SUMMARY_ENABLED", "true").lower() in ("1", "true", "yes")
+    RECIPIENT = os.environ.get("DAILY_SUMMARY_RECIPIENT", "zoe5559@gmail.com") #"info@michalsela.org.il")
+    TIMEZONE = os.environ.get("DAILY_SUMMARY_TIMEZONE", "Asia/Jerusalem")
+    SEND_HOUR = int(os.environ.get("DAILY_SUMMARY_SEND_HOUR", "9"))
+    SEND_MINUTE = int(os.environ.get("DAILY_SUMMARY_SEND_MINUTE", "0"))
+
+    # Azure Communication Services Email
+    CONNECTION_STRING = os.environ.get("COMMUNICATION_SERVICES_CONNECTION_STRING", "")
+    # Verified ACS mail domain, e.g. "abcd1234.azurecomm.net"
+    MAIL_DOMAIN_NAME = os.environ.get("MAIL_DOMAIN_NAME", "")
+    # Sender is DoNotReply@<domain>
+    SENDER_ADDRESS = f"DoNotReply@{MAIL_DOMAIN_NAME}" if MAIL_DOMAIN_NAME else ""
+    
+
 # רשימת שדות למיצוי מידע משיחות (בעברית)
 # List of fields for extracting information from conversations (in Hebrew)
 EXTRACTION_FIELDS = [
@@ -65,6 +83,7 @@ EXTRACTION_FIELDS = [
     "האם פנתה לאן שהפנינו",
     "האם קיבלה מענה טוב",
     "האם היא רוצה שנציג אנושי יחזור אליה",
+    "איך הסתיימה השיחה",
 ]
 
 # ---------- Predefined categories for extraction (used to constrain LLM output) ----------
@@ -171,5 +190,11 @@ URGENCY_LEVEL_OPTIONS = [
     "גבוהה - מצב מסוכן",
     "בינונית - דורש טיפול",
     "נמוכה - בקשת מידע בלבד",
+]
+
+CONVERSATION_ENDING_OPTIONS = [
+    "נטישה",
+    "נציגה תחזור",
+    "שיחה הושלמה",
 ]
 

@@ -2,7 +2,7 @@ import os
 import json
 import asyncio
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from langchain_openai import AzureChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import BaseMessage
@@ -16,6 +16,7 @@ from config import (
     REFERRED_TO_OPTIONS,
     YES_NO_OPTIONS,
     URGENCY_LEVEL_OPTIONS,
+    CONVERSATION_ENDING_OPTIONS,
     MULTI_VALUE_FIELDS,
 )
 
@@ -34,7 +35,159 @@ FIELD_NAME_MAPPING = {
     "האם קיבלה מענה טוב": "received_good_response",
     "האם היא רוצה שנציג אנושי יחזור אליה": "wants_human_callback",
     "רמת דחיפות": "urgency_level",
+    "איך הסתיימה השיחה": "conversation_ending",
 }
+
+
+def infer_conversation_ending(messages: List[BaseMessage]) -> str:
+    """Static fallback classifier over the recent message window."""
+    if not messages:
+        return "נטישה"
+
+    recent_messages = [
+        msg for msg in messages[-8:]
+        if str(getattr(msg, "content", "") or "").strip()
+    ]
+    if not recent_messages:
+        return "נטישה"
+
+    def _msg_type(msg: BaseMessage) -> str:
+        return str(getattr(msg, "type", "") or "").strip().lower()
+
+    callback_markers = {
+        "נציג", "נציגה", "יחזור", "תחזור", "חזרה", "callback", "call back",
+        "לחזור אליי", "לחזור אלי", "שיחזרו", "שיחה עם נציג", "שיחה עם נציגה",
+    }
+    for msg in recent_messages:
+        msg_type = _msg_type(msg)
+        if msg_type not in {"human", "user"}:
+            continue
+        content = str(getattr(msg, "content", "") or "").lower()
+        if any(marker in content for marker in callback_markers):
+            return "נציגה תחזור"
+
+    closing_markers = {
+        "תודה", "תודה רבה", "להתראות", "סיום", "נגמר", "סיימנו", "bye", "goodbye", "thanks",
+    }
+
+    last_message = recent_messages[-1]
+    last_type = _msg_type(last_message)
+    last_content = str(getattr(last_message, "content", "") or "").strip().lower()
+
+    if any(marker in last_content for marker in closing_markers):
+        return "שיחה הושלמה"
+
+    if last_type in {"assistant", "ai"}:
+        # When the assistant spoke last without callback intent, treat as completed.
+        return "שיחה הושלמה"
+
+    # User spoke last without clear closure and no callback request -> likely abrupt end.
+    return "נטישה"
+
+
+async def infer_conversation_ending_with_agent(
+    messages: List[BaseMessage], llm: Optional[AzureChatOpenAI] = None
+) -> Optional[str]:
+    """Ask the model to classify conversation ending from the full conversation.
+
+    Returns one of the configured tags, or None when the model is uncertain/invalid.
+    """
+    if not messages:
+        return None
+
+    full_messages = [
+        msg for msg in messages
+        if str(getattr(msg, "content", "") or "").strip()
+    ]
+    if not full_messages:
+        return None
+
+    conversation_text = "\n".join(
+        f"{getattr(msg, 'type', 'unknown')}: {getattr(msg, 'content', '')}"
+        for msg in full_messages
+    )
+
+    local_llm = llm or AzureChatOpenAI(
+        api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
+        azure_deployment=os.getenv("DEPLOYMENT_NAME"),
+        temperature=0,
+        request_timeout=20,
+    )
+
+    prompt = ChatPromptTemplate.from_messages([
+        (
+            "system",
+            """את מסווגת את אופן סיום השיחה. החזירי ערך אחד בלבד מתוך:
+- נטישה
+- שיחה הושלמה
+- נציגה תחזור
+
+הגדרות מחייבות:
+1) נציגה תחזור:
+- אם הפונה ביקשה במפורש שיחזרו אליה נציג/ה אנושי/ת.
+- כולל ניסוחים כמו "תחזרו אליי", "שנציג יחזור", "אפשר לדבר עם נציגה".
+
+2) שיחה הושלמה:
+- הפונה קיבלה מענה למה שביקשה, ואין שאלה פתוחה שלא נענתה.
+- לרוב יש סימן סיום טבעי כמו תודה/להתראות/אישור שהכול ברור.
+- אפשר לסווג כהושלמה גם בלי "תודה" אם ברור שהמענה ניתן במלואו ולא נשאר צורך פתוח.
+
+3) נטישה:
+- השיחה נעצרה בלי אינדיקציה ברורה שהנושא נסגר.
+- במיוחד אם נשארה שאלה פתוחה, בקשה שלא נענתה, או שהעוזרת ביקשה הבהרה והפונה לא המשיכה.
+- אם לא ברור אם הפונה קיבלה מענה מלא - העדיפי נטישה.
+
+כללי הכרעה:
+- השתמשי בכל ההודעות שסופקו לך (כל השיחה), ותני משקל מיוחד לשלבי הסיום.
+- סדר עדיפויות במקרה של סימנים מעורבים: נציגה תחזור > שיחה הושלמה > נטישה.
+- אם אין ודאות מספקת לקבוע בביטחון, החזירי decidable=false.
+
+החזירי JSON בלבד בפורמט:
+{"decidable": true/false, "conversation_ending": "נטישה|שיחה הושלמה|נציגה תחזור|null"}
+""",
+        ),
+        ("human", "הודעות אחרונות:\n{conversation}"),
+    ])
+
+    try:
+        result = await asyncio.wait_for(
+            (prompt | local_llm).ainvoke({"conversation": conversation_text}),
+            timeout=25,
+        )
+        raw = str(getattr(result, "content", "") or "").strip()
+        if raw.startswith("```"):
+            raw = raw.strip("`")
+            if raw.lower().startswith("json"):
+                raw = raw[4:].strip()
+
+        parsed = json.loads(raw)
+        if not bool(parsed.get("decidable", False)):
+            return None
+
+        candidate = str(parsed.get("conversation_ending") or "").strip()
+        if candidate in set(CONVERSATION_ENDING_OPTIONS):
+            return candidate
+        return None
+    except Exception:
+        return None
+
+
+async def resolve_conversation_ending(
+    value: Any,
+    messages: List[BaseMessage],
+    llm: Optional[AzureChatOpenAI] = None,
+) -> str:
+    """Agent-first ending decision with static fallback only when undecidable."""
+    allowed = set(CONVERSATION_ENDING_OPTIONS)
+    text_value = str(value).strip() if value is not None else ""
+    if text_value in allowed:
+        return text_value
+
+    agent_decision = await infer_conversation_ending_with_agent(messages, llm=llm)
+    if agent_decision in allowed:
+        return agent_decision
+
+    return infer_conversation_ending(messages)
 
 
 async def extract_conversation_insights(session_id: str, messages: List[BaseMessage], session_metadata: Dict[str, Any] = None) -> Dict[str, Any]:
@@ -76,6 +229,7 @@ async def extract_conversation_insights(session_id: str, messages: List[BaseMess
 - "האם קיבלה מענה טוב": [{_fmt(YES_NO_OPTIONS)}]
 - "האם היא רוצה שנציג אנושי יחזור אליה": [{_fmt(YES_NO_OPTIONS)}]
 - "רמת דחיפות": [{_fmt(URGENCY_LEVEL_OPTIONS)}]
+- "איך הסתיימה השיחה": [{_fmt(CONVERSATION_ENDING_OPTIONS)}]
 
 חשוב מאוד:
 1. הערכים חייבים להיות **בדיוק** כפי שמופיעים ברשימה. אל תשני ניסוח, אל תוסיפי מילים.
@@ -92,7 +246,8 @@ async def extract_conversation_insights(session_id: str, messages: List[BaseMess
     "האם פנתה לאן שהפנינו": "...",
     "האם קיבלה מענה טוב": "...",
     "האם היא רוצה שנציג אנושי יחזור אליה": "...",
-    "רמת דחיפות": "..."
+    "רמת דחיפות": "...",
+    "איך הסתיימה השיחה": "..."
 }}}}
 """),
             ("human", "שיחה:\n{conversation}")
@@ -158,6 +313,10 @@ async def extract_conversation_insights(session_id: str, messages: List[BaseMess
                 except Exception:
                     pass
 
+        # Guarantee this tag exists in every extraction payload.
+        extracted_data["conversation_ending"] = await resolve_conversation_ending(
+            extracted_data.get("conversation_ending"), messages, llm=llm
+        )
         extracted_data["conversation_time"] = conversation_duration_minutes
 
         return {
@@ -173,6 +332,10 @@ async def extract_conversation_insights(session_id: str, messages: List[BaseMess
             "session_id": session_id,
             "extraction_timestamp": datetime.utcnow().isoformat(),
             "message_count": len(messages) if messages else 0,
+            "extracted_fields": {
+                "conversation_ending": infer_conversation_ending(messages),
+                "conversation_time": None,
+            },
             "extraction_error": "Extraction timed out after 90 seconds"
         }
         
@@ -184,6 +347,10 @@ async def extract_conversation_insights(session_id: str, messages: List[BaseMess
             "session_id": session_id,
             "extraction_timestamp": datetime.utcnow().isoformat(),
             "message_count": len(messages) if messages else 0,
+            "extracted_fields": {
+                "conversation_ending": infer_conversation_ending(messages),
+                "conversation_time": None,
+            },
             "extraction_error": str(e)
         }
 
