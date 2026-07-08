@@ -177,6 +177,7 @@ def load_env_variables():
         "key": os.getenv("AZURE_OPENAI_API_KEY"),
         "endpoint": os.getenv("AZURE_OPENAI_ENDPOINT"),
         "deployment_name": os.getenv("DEPLOYMENT_NAME"),
+        "extraction_deployment_name": os.getenv("EXTRACTION_DEPLOYMENT_NAME") or os.getenv("DEPLOYMENT_NAME"),
         "api_version": os.getenv("AZURE_OPENAI_API_VERSION"),
     }
 

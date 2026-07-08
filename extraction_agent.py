@@ -190,6 +190,11 @@ async def resolve_conversation_ending(
     return infer_conversation_ending(messages)
 
 
+def _get_extraction_deployment_name() -> str | None:
+    """Prefer a dedicated extraction deployment, then fall back to the chat deployment."""
+    return os.getenv("EXTRACTION_DEPLOYMENT_NAME") or os.getenv("DEPLOYMENT_NAME")
+
+
 async def extract_conversation_insights(session_id: str, messages: List[BaseMessage], session_metadata: Dict[str, Any] = None) -> Dict[str, Any]:
     print(f"🔍 Starting extraction for session {session_id} with {len(messages)} messages")
     try:
@@ -256,7 +261,7 @@ async def extract_conversation_insights(session_id: str, messages: List[BaseMess
         # Initialize Azure OpenAI with timeout
         llm = AzureChatOpenAI(
             api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
-            azure_deployment=os.getenv("DEPLOYMENT_NAME"),
+            azure_deployment=_get_extraction_deployment_name(),
             temperature=0.1,  # Lower temperature for more consistent extraction
             request_timeout=60  # 60 second timeout
         )

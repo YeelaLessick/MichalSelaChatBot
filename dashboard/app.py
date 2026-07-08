@@ -12,6 +12,9 @@ import os
 import sys
 import time
 import threading
+import io
+import hmac
+import calendar
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -33,11 +36,27 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 
 def _get_secret(st_key: str, env_key: str, default: str = "") -> str:
-    """Read from st.secrets (Streamlit Cloud) first, fall back to env var."""
+    """Resolve config from Streamlit secrets first, then env vars.
+
+    Supported Streamlit secrets layouts:
+    1) [postgres] block with short keys (host, user, ...)
+    2) top-level env-style keys (POSTGRES_HOST, POSTGRES_USER, ...)
+    3) top-level short keys (host, user, ...)
+    """
     try:
-        return st.secrets["postgres"][st_key]
-    except (KeyError, FileNotFoundError):
-        return os.getenv(env_key, default)
+        postgres_block = st.secrets.get("postgres", {})
+        if st_key in postgres_block:
+            return str(postgres_block[st_key])
+
+        if env_key in st.secrets:
+            return str(st.secrets[env_key])
+
+        if st_key in st.secrets:
+            return str(st.secrets[st_key])
+    except (KeyError, FileNotFoundError, AttributeError):
+        pass
+
+    return os.getenv(env_key, default)
 
 
 PG_HOST     = _get_secret("host",     "POSTGRES_HOST")
@@ -47,6 +66,105 @@ PG_USER     = _get_secret("user",     "POSTGRES_USER")
 PG_PASSWORD = _get_secret("password", "POSTGRES_PASSWORD")
 PG_SSLMODE  = _get_secret("sslmode",  "POSTGRES_SSLMODE", "require")
 USE_AAD     = _get_secret("use_aad",  "POSTGRES_USE_AAD", "").lower() in ("1", "true", "yes")
+
+
+def _get_azure_secret(key: str, default: str = "") -> str:
+    """Resolve Azure auth values from st.secrets or environment variables."""
+    try:
+        azure_block = st.secrets.get("azure", {})
+        if key in azure_block:
+            return str(azure_block[key])
+        if key in st.secrets:
+            return str(st.secrets[key])
+    except (KeyError, FileNotFoundError, AttributeError):
+        pass
+    return os.getenv(key, default)
+
+
+def _get_cost_secret(key: str, env_key: str, default: str = "") -> str:
+    """Resolve cost-export config from [cost] secrets, top-level secrets, then env."""
+    try:
+        cost_block = st.secrets.get("cost", {})
+        lookup_keys = [
+            key,
+            key.lower(),
+            key.upper(),
+            env_key,
+            env_key.lower(),
+            env_key.upper(),
+        ]
+
+        for lk in lookup_keys:
+            if lk in cost_block:
+                return str(cost_block[lk])
+
+        for lk in lookup_keys:
+            if lk in st.secrets:
+                return str(st.secrets[lk])
+    except (KeyError, FileNotFoundError, AttributeError):
+        pass
+
+    env_lookup = [env_key, env_key.lower(), env_key.upper()]
+    for ek in env_lookup:
+        val = os.getenv(ek)
+        if val:
+            return val
+
+    return os.getenv(env_key, default)
+
+
+def _get_auth_secret(key: str, env_key: str, default: str = "") -> str:
+    """Resolve dashboard auth config from [auth] secrets, top-level secrets, then env."""
+    try:
+        auth_block = st.secrets.get("auth", {})
+        lookup_keys = [key, key.lower(), key.upper(), env_key, env_key.lower(), env_key.upper()]
+
+        for lk in lookup_keys:
+            if lk in auth_block:
+                return str(auth_block[lk])
+
+        for lk in lookup_keys:
+            if lk in st.secrets:
+                return str(st.secrets[lk])
+    except (KeyError, FileNotFoundError, AttributeError):
+        pass
+
+    env_lookup = [env_key, env_key.lower(), env_key.upper()]
+    for ek in env_lookup:
+        val = os.getenv(ek)
+        if val:
+            return val
+
+    return default
+
+
+def require_dashboard_password() -> None:
+    """Block the dashboard until the configured password is provided."""
+    expected_password = _get_auth_secret("password", "DASHBOARD_PASSWORD")
+
+    if not expected_password:
+        st.error(
+            "Dashboard password is not configured. Add [auth].password or DASHBOARD_PASSWORD."
+        )
+        st.stop()
+
+    if st.session_state.get("dashboard_authenticated"):
+        return
+
+    st.title("🔒 Dashboard Locked")
+    st.caption("Enter the dashboard password to continue.")
+
+    with st.form("dashboard-login"):
+        password_input = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Unlock Dashboard")
+
+    if submitted:
+        if hmac.compare_digest(password_input, expected_password):
+            st.session_state["dashboard_authenticated"] = True
+            st.rerun()
+        st.error("Incorrect password.")
+
+    st.stop()
 
 # ---------------------------------------------------------------------------
 # Postgres helpers (with AAD token caching)
@@ -64,9 +182,26 @@ def _get_aad_token() -> str:
         if cached and _token_cache["expires_at"] - now > 300:
             return cached
         from azure.identity import DefaultAzureCredential
-        cred = DefaultAzureCredential(
-            managed_identity_client_id=os.environ.get("AZURE_CLIENT_ID")
-        )
+
+        tenant_id = _get_azure_secret("AZURE_TENANT_ID")
+        client_id = _get_azure_secret("AZURE_CLIENT_ID")
+        client_secret = _get_azure_secret("AZURE_CLIENT_SECRET")
+
+        # Streamlit Cloud doesn't provide Managed Identity. Prefer explicit
+        # service-principal credentials when supplied in secrets.
+        if tenant_id and client_id and client_secret:
+            from azure.identity import ClientSecretCredential
+
+            cred = ClientSecretCredential(
+                tenant_id=tenant_id,
+                client_id=client_id,
+                client_secret=client_secret,
+            )
+        else:
+            cred = DefaultAzureCredential(
+                managed_identity_client_id=client_id or None
+            )
+
         access = cred.get_token(_AAD_SCOPE)
         _token_cache["token"] = access.token
         _token_cache["expires_at"] = float(access.expires_on)
@@ -91,6 +226,109 @@ def _connect() -> psycopg.Connection:
         connect_timeout=10,
         row_factory=dict_row,
     )
+
+
+def _get_azure_credential():
+    """Create an Azure credential for Blob access.
+
+    Streamlit Cloud should use service principal credentials from secrets.
+    """
+    from azure.identity import ClientSecretCredential, DefaultAzureCredential
+
+    tenant_id = _get_azure_secret("AZURE_TENANT_ID")
+    client_id = _get_azure_secret("AZURE_CLIENT_ID")
+    client_secret = _get_azure_secret("AZURE_CLIENT_SECRET")
+
+    if tenant_id and client_id and client_secret:
+        return ClientSecretCredential(
+            tenant_id=tenant_id,
+            client_id=client_id,
+            client_secret=client_secret,
+        )
+
+    return DefaultAzureCredential(managed_identity_client_id=client_id or None)
+
+
+@st.cache_data(ttl=120)
+def load_cost_export() -> tuple[pd.DataFrame, str, dict]:
+    """Load Azure Cost Management export CSV files from Blob Storage.
+
+    Returns:
+        (dataframe, status, context)
+        status in {"ok", "missing_account", "no_blobs", "error"}
+    """
+    account = _get_cost_secret("storage_account", "COST_STORAGE_ACCOUNT")
+    container = _get_cost_secret("container", "COST_CONTAINER", "cost-exports")
+    directory = _get_cost_secret("directory", "COST_DIRECTORY", "cost/daily")
+    context = {"account": account, "container": container, "directory": directory}
+
+    if not account:
+        return pd.DataFrame(), "missing_account", context
+
+    try:
+        from azure.storage.blob import BlobServiceClient
+
+        account_url = f"https://{account}.blob.core.windows.net"
+        blob_service = BlobServiceClient(account_url=account_url, credential=_get_azure_credential())
+        container_client = blob_service.get_container_client(container)
+
+        blobs = list(container_client.list_blobs(name_starts_with=directory))
+        if not blobs:
+            return pd.DataFrame(), "no_blobs", context
+
+        # Load newest files first and cap to avoid heavy dashboard startup.
+        blobs = sorted(blobs, key=lambda b: b.last_modified or datetime.min.replace(tzinfo=timezone.utc), reverse=True)[:20]
+
+        frames = []
+        for blob in blobs:
+            if not blob.name.lower().endswith(".csv"):
+                continue
+            data = container_client.download_blob(blob.name).readall()
+            try:
+                df_blob = pd.read_csv(io.BytesIO(data))
+                if not df_blob.empty:
+                    frames.append(df_blob)
+            except Exception:
+                # Skip malformed files and continue.
+                continue
+
+        if not frames:
+            return pd.DataFrame(), "no_blobs", context
+
+        return pd.concat(frames, ignore_index=True), "ok", context
+    except Exception as exc:
+        context["error"] = str(exc)
+        return pd.DataFrame(), "error", context
+
+
+def _normalise_cost_dataframe(df_cost: pd.DataFrame) -> pd.DataFrame:
+    """Map export schema variants to a common shape: date + cost."""
+    if df_cost.empty:
+        return df_cost
+
+    date_col = next(
+        (c for c in ["Date", "UsageDate", "date", "usageDate"] if c in df_cost.columns),
+        None,
+    )
+    cost_col = next(
+        (c for c in ["CostInBillingCurrency", "PreTaxCost", "Cost", "costInBillingCurrency"] if c in df_cost.columns),
+        None,
+    )
+
+    if not date_col or not cost_col:
+        return pd.DataFrame()
+
+    out = pd.DataFrame()
+
+    # Cost export sometimes uses yyyymmdd integers in UsageDate.
+    if date_col.lower() == "usagedate":
+        out["date"] = pd.to_datetime(df_cost[date_col].astype(str), format="%Y%m%d", errors="coerce", utc=True)
+    else:
+        out["date"] = pd.to_datetime(df_cost[date_col], errors="coerce", utc=True)
+
+    out["cost"] = pd.to_numeric(df_cost[cost_col], errors="coerce").fillna(0.0)
+    out = out.dropna(subset=["date"]) 
+    return out
 
 
 @st.cache_data(ttl=300)  # cache for 5 minutes
@@ -142,8 +380,6 @@ def load_extractions() -> pd.DataFrame:
                 "caller_gender":        fields.get("caller_gender"),
                 "relationship_to_threat": fields.get("relationship_to_threat"),
                 "referred_to":          fields.get("referred_to"),
-                "contacted_referral":   fields.get("contacted_referral"),
-                "received_good_response": fields.get("received_good_response"),
                 "wants_human_callback": fields.get("wants_human_callback"),
                 "urgency_level":        fields.get("urgency_level"),
                 "conversation_ending":  fields.get("conversation_ending"),
@@ -173,25 +409,69 @@ def load_extractions() -> pd.DataFrame:
 
 @st.cache_data(ttl=300)
 def load_conversations() -> pd.DataFrame:
-    """Fetch conversation metadata (message counts) from Postgres."""
+    """Fetch conversations plus metadata from Postgres."""
     try:
         with _connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
                     SELECT
-                        session_id,
-                        jsonb_array_length(conversation) AS msg_count
-                    FROM conversations
+                        c.session_id,
+                        c.conversation,
+                        c.updated_at,
+                        jsonb_array_length(c.conversation) AS msg_count,
+                        COALESCE(e.metadata->>'channel', 'unknown') AS channel,
+                        e.metadata->>'phone_number' AS phone_number,
+                        COALESCE(
+                            (e.extraction->>'extraction_timestamp')::timestamptz,
+                            (e.metadata->>'extraction_timestamp')::timestamptz,
+                            e.created_at,
+                            c.updated_at
+                        ) AS extraction_timestamp
+                    FROM conversations c
+                    LEFT JOIN extractions e
+                        ON e.session_id = c.session_id
+                    ORDER BY c.updated_at DESC
                     """
                 )
                 rows = cur.fetchall()
         if not rows:
             return pd.DataFrame()
-        return pd.DataFrame(rows)
+        df_conv = pd.DataFrame(rows)
+        for col in ["updated_at", "extraction_timestamp"]:
+            if col in df_conv.columns:
+                df_conv[col] = pd.to_datetime(df_conv[col], errors="coerce", utc=True)
+        return df_conv
     except Exception as e:
         st.error(f"Error loading conversations: {e}")
         return pd.DataFrame()
+
+
+def _conversation_to_rows(conversation) -> pd.DataFrame:
+    """Expand a stored conversation JSON array into displayable table rows."""
+    if not isinstance(conversation, list):
+        return pd.DataFrame()
+
+    rows = []
+    for index, msg in enumerate(conversation, start=1):
+        if isinstance(msg, dict):
+            rows.append(
+                {
+                    "message_index": index,
+                    "type": str(msg.get("type", "unknown")),
+                    "content": str(msg.get("content", "")),
+                }
+            )
+        else:
+            rows.append(
+                {
+                    "message_index": index,
+                    "type": "unknown",
+                    "content": str(msg),
+                }
+            )
+
+    return pd.DataFrame(rows)
 
 
 def _explode_multi(df: pd.DataFrame, col: str) -> pd.Series:
@@ -227,6 +507,8 @@ st.set_page_config(
     page_icon="💜",
     layout="wide",
 )
+
+require_dashboard_password()
 
 st.title("💜 Michal Sela Chatbot – Extraction Statistics")
 st.caption("Live statistics from conversation extractions stored in Postgres")
@@ -271,13 +553,99 @@ if channels:
     selected_channels = st.sidebar.multiselect("Channel", channels, default=channels)
     df = df[df["channel"].isin(selected_channels)]
 
+# Phone number search (partial match)
+phone_query = st.sidebar.text_input("Phone number", value="").strip()
+if phone_query and "phone_number" in df.columns:
+    df = df[
+        df["phone_number"].fillna("").astype(str).str.contains(phone_query, case=False, regex=False)
+    ]
+
 # Refresh button
 if st.sidebar.button("🔄 Refresh Data"):
     st.cache_data.clear()
     st.rerun()
 
+if st.sidebar.button("🔒 Lock Dashboard"):
+    st.session_state.pop("dashboard_authenticated", None)
+    st.rerun()
+
 st.sidebar.markdown("---")
 st.sidebar.info(f"Showing **{len(df)}** extraction records")
+
+# ---------------------------------------------------------------------------
+# Cost Overview (from Azure Cost export in Blob Storage)
+# ---------------------------------------------------------------------------
+st.header("💸 Cost Overview")
+
+cost_raw, cost_status, cost_context = load_cost_export()
+cost_df = _normalise_cost_dataframe(cost_raw)
+
+if cost_df.empty:
+    if cost_status == "missing_account":
+        st.info(
+            "Cost export is not configured yet. Add Streamlit secrets under [cost]: "
+            "storage_account, container (default cost-exports), directory (default cost/daily), "
+            "and optional monthly_budget_usd."
+        )
+    elif cost_status == "no_blobs":
+        st.warning(
+            "Cost export location is configured, but no CSV files were found yet. "
+            "This can happen before the first scheduled export run."
+        )
+        st.caption(
+            f"Checked: account={cost_context.get('account')}, "
+            f"container={cost_context.get('container')}, "
+            f"directory={cost_context.get('directory')}"
+        )
+    elif cost_status == "error":
+        st.error(
+            "Cost export is configured but could not be loaded. "
+            "Check Blob permissions for the dashboard identity (Storage Blob Data Reader)."
+        )
+        st.caption(
+            f"Checked: account={cost_context.get('account')}, "
+            f"container={cost_context.get('container')}, "
+            f"directory={cost_context.get('directory')}"
+        )
+        st.code(str(cost_context.get("error", "Unknown error")), language="text")
+    else:
+        st.info("Cost export data is not available yet.")
+else:
+    now_utc = datetime.now(timezone.utc)
+    month_start = now_utc.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    month_mask = (cost_df["date"] >= month_start) & (cost_df["date"] <= now_utc)
+    mtd_df = cost_df[month_mask]
+
+    mtd_cost = float(mtd_df["cost"].sum()) if not mtd_df.empty else 0.0
+    days_elapsed = max(1, now_utc.day)
+    days_in_month = calendar.monthrange(now_utc.year, now_utc.month)[1]
+    forecast_eom = (mtd_cost / days_elapsed) * days_in_month
+
+    monthly_budget_raw = _get_cost_secret("monthly_budget_usd", "COST_MONTHLY_BUDGET_USD", "125")
+    monthly_budget = float(monthly_budget_raw) if monthly_budget_raw else 125.0
+    remaining = (monthly_budget - mtd_cost) if monthly_budget is not None else None
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("MTD Cost (USD)", f"${mtd_cost:,.2f}")
+    c2.metric("Forecast EOM (USD)", f"${forecast_eom:,.2f}")
+    c3.metric("Remaining Budget (USD)", f"${remaining:,.2f}" if remaining is not None else "-")
+
+    monthly = (
+        cost_df.assign(month=cost_df["date"].dt.to_period("M").dt.to_timestamp())
+        .groupby("month", as_index=False)["cost"]
+        .sum()
+        .sort_values("month")
+        .tail(12)
+    )
+    fig_cost = px.line(
+        monthly,
+        x="month",
+        y="cost",
+        markers=True,
+        title="Monthly Cost Trend (Last 12 Months)",
+        labels={"month": "Month", "cost": "Cost (USD)"},
+    )
+    st.plotly_chart(fig_cost, width="stretch")
 
 # ---------------------------------------------------------------------------
 # KPIs – top row
@@ -325,7 +693,7 @@ if "extraction_timestamp" in df.columns and df["extraction_timestamp"].notna().a
         color_discrete_sequence=["#9b59b6"],
     )
     fig_time.update_layout(bargap=0.2)
-    st.plotly_chart(fig_time, use_container_width=True)
+    st.plotly_chart(fig_time, width="stretch")
 
 # ---------------------------------------------------------------------------
 # Channel distribution
@@ -341,7 +709,7 @@ fig_channel = px.pie(
     names="channel",
     color_discrete_sequence=px.colors.qualitative.Set2,
 )
-col_ch1.plotly_chart(fig_channel, use_container_width=True)
+col_ch1.plotly_chart(fig_channel, width="stretch")
 
 # Channel vs average message count
 channel_msg = df.groupby("channel")["message_count"].mean().reset_index()
@@ -353,7 +721,7 @@ fig_ch_msg = px.bar(
     labels={"channel": "Channel", "avg_messages": "Avg Messages"},
     color_discrete_sequence=["#2ecc71"],
 )
-col_ch2.plotly_chart(fig_ch_msg, use_container_width=True)
+col_ch2.plotly_chart(fig_ch_msg, width="stretch")
 
 # ---------------------------------------------------------------------------
 # Demographics
@@ -372,7 +740,7 @@ if not gender_counts.empty:
         title="Caller Gender (מין הפונה)",
         color_discrete_sequence=px.colors.qualitative.Pastel,
     )
-    col_d1.plotly_chart(fig_gender, use_container_width=True)
+    col_d1.plotly_chart(fig_gender, width="stretch")
 else:
     col_d1.info("No gender data available")
 
@@ -395,7 +763,7 @@ if not age_values.empty:
         labels={"age_range": "Age Range", "count": "Count"},
         color_discrete_sequence=["#3498db"],
     )
-    col_d2.plotly_chart(fig_age, use_container_width=True)
+    col_d2.plotly_chart(fig_age, width="stretch")
 else:
     col_d2.info("No age data available")
 
@@ -420,7 +788,7 @@ if not subject_counts.empty:
         color_discrete_sequence=["#e74c3c"],
     )
     fig_subject.update_layout(yaxis=dict(autorange="reversed"))
-    col_i1.plotly_chart(fig_subject, use_container_width=True)
+    col_i1.plotly_chart(fig_subject, width="stretch")
 else:
     col_i1.info("No inquiry subject data available")
 
@@ -438,7 +806,7 @@ if not rel_counts.empty:
         color_discrete_sequence=["#f39c12"],
     )
     fig_rel.update_layout(yaxis=dict(autorange="reversed"))
-    col_i2.plotly_chart(fig_rel, use_container_width=True)
+    col_i2.plotly_chart(fig_rel, width="stretch")
 else:
     col_i2.info("No relationship data available")
 
@@ -446,7 +814,6 @@ else:
 # Referrals
 # ---------------------------------------------------------------------------
 st.header("🔗 Referral Analysis")
-col_r1, col_r2 = st.columns(2)
 
 # Where referred
 referred_values = _explode_multi(df, "referred_to")
@@ -463,47 +830,15 @@ if not referred_counts.empty:
         color_discrete_sequence=["#1abc9c"],
     )
     fig_referred.update_layout(yaxis=dict(autorange="reversed"))
-    col_r1.plotly_chart(fig_referred, use_container_width=True)
+    st.plotly_chart(fig_referred, width="stretch")
 else:
-    col_r1.info("No referral data available")
-
-# Contacted referral
-df["contacted_referral_norm"] = df["contacted_referral"].apply(normalise_yesno)
-contacted_counts = df["contacted_referral_norm"].dropna().value_counts().reset_index()
-contacted_counts.columns = ["contacted", "count"]
-if not contacted_counts.empty:
-    fig_contacted = px.pie(
-        contacted_counts,
-        values="count",
-        names="contacted",
-        title="Contacted Referral? (האם פנתה לאן שהפנינו)",
-        color_discrete_sequence=["#2ecc71", "#e74c3c", "#95a5a6"],
-    )
-    col_r2.plotly_chart(fig_contacted, use_container_width=True)
-else:
-    col_r2.info("No contacted-referral data available")
+    st.info("No referral data available")
 
 # ---------------------------------------------------------------------------
 # Outcome Metrics
 # ---------------------------------------------------------------------------
 st.header("✅ Outcome Metrics")
-col_o1, col_o2 = st.columns(2)
-
-# Received good response
-df["good_response_norm"] = df["received_good_response"].apply(normalise_yesno)
-good_counts = df["good_response_norm"].dropna().value_counts().reset_index()
-good_counts.columns = ["response", "count"]
-if not good_counts.empty:
-    fig_good = px.pie(
-        good_counts,
-        values="count",
-        names="response",
-        title="Received Good Response? (האם קיבלה מענה טוב)",
-        color_discrete_sequence=["#2ecc71", "#e74c3c", "#95a5a6"],
-    )
-    col_o1.plotly_chart(fig_good, use_container_width=True)
-else:
-    col_o1.info("No response quality data available")
+col_o1 = st.columns(1)[0]
 
 # Wants human callback
 df["callback_norm"] = df["wants_human_callback"].apply(normalise_yesno)
@@ -517,9 +852,9 @@ if not callback_counts.empty:
         title="Wants Human Callback? (האם רוצה שנציג יחזור)",
         color_discrete_sequence=["#3498db", "#e67e22", "#95a5a6"],
     )
-    col_o2.plotly_chart(fig_callback, use_container_width=True)
+    col_o1.plotly_chart(fig_callback, width="stretch")
 else:
-    col_o2.info("No callback data available")
+    col_o1.info("No callback data available")
 
 # ---------------------------------------------------------------------------
 # Urgency & Conversation Duration
@@ -553,7 +888,7 @@ if "urgency_level" in df.columns:
             },
         )
         fig_urgency.update_layout(yaxis=dict(autorange="reversed"), showlegend=False)
-        col_u1.plotly_chart(fig_urgency, use_container_width=True)
+        col_u1.plotly_chart(fig_urgency, width="stretch")
     else:
         col_u1.info("No urgency data available")
 else:
@@ -570,7 +905,7 @@ if "conversation_time" in df.columns:
             labels={"value": "Duration (min)", "count": "Count"},
             color_discrete_sequence=["#9b59b6"],
         )
-        col_u2.plotly_chart(fig_dur, use_container_width=True)
+        col_u2.plotly_chart(fig_dur, width="stretch")
     else:
         col_u2.info("No duration data available")
 else:
@@ -594,8 +929,6 @@ with st.expander("Show raw data table", expanded=False):
         "caller_gender",
         "relationship_to_threat",
         "referred_to",
-        "contacted_referral",
-        "received_good_response",
         "wants_human_callback",
         "has_error",
     ]
@@ -614,10 +947,70 @@ with st.expander("Show raw data table", expanded=False):
     )
 
 # ---------------------------------------------------------------------------
+# Full Conversation Viewer
+# ---------------------------------------------------------------------------
+st.header("💬 Full Conversations")
+with st.expander("Show full conversations", expanded=False):
+    conversations_df = load_conversations()
+
+    if conversations_df.empty:
+        st.info("No stored conversations found.")
+    else:
+        visible_session_ids = set(df["session_id"].dropna().astype(str))
+        filtered_conversations = conversations_df[
+            conversations_df["session_id"].astype(str).isin(visible_session_ids)
+        ].copy()
+
+        if filtered_conversations.empty:
+            st.info("No conversations match the current filters.")
+        else:
+            summary_cols = [
+                "session_id",
+                "extraction_timestamp",
+                "updated_at",
+                "channel",
+                "phone_number",
+                "msg_count",
+            ]
+            available_summary_cols = [c for c in summary_cols if c in filtered_conversations.columns]
+            st.dataframe(
+                filtered_conversations[available_summary_cols],
+                width="stretch",
+                hide_index=True,
+            )
+
+            session_options = filtered_conversations["session_id"].astype(str).tolist()
+            selected_session = st.selectbox(
+                "Select a session to inspect",
+                options=session_options,
+            )
+
+            selected_match = filtered_conversations[
+                filtered_conversations["session_id"].astype(str) == selected_session
+            ]
+            selected_row = selected_match.iloc[0]
+
+            st.caption(
+                f"Channel: {selected_row.get('channel') or 'unknown'} · "
+                f"Phone: {selected_row.get('phone_number') or '-'} · "
+                f"Messages: {selected_row.get('msg_count', 0)}"
+            )
+
+            message_df = _conversation_to_rows(selected_row.get("conversation"))
+            if message_df.empty:
+                st.info("This session does not contain any stored messages.")
+            else:
+                st.dataframe(
+                    message_df,
+                    width="stretch",
+                    hide_index=True,
+                )
+
+# ---------------------------------------------------------------------------
 # Footer
 # ---------------------------------------------------------------------------
 st.markdown("---")
 st.caption(
     f"Dashboard last refreshed: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} · "
-    f"Data source: Cosmos DB ({EXT_DATABASE}/{EXT_CONTAINER})"
+    f"Data source: Postgres ({PG_DB}@{PG_HOST})"
 )
