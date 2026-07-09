@@ -23,6 +23,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 import psycopg
 from psycopg.rows import dict_row
 from dotenv import load_dotenv
@@ -31,6 +32,9 @@ from collections import Counter
 # Add parent directory to path so we can import config
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from config import MULTI_VALUE_FIELDS
+
+# All timestamps are stored in UTC but displayed in Israel local time.
+ISRAEL_TZ = "Asia/Jerusalem"
 
 # ---------------------------------------------------------------------------
 # Configuration – supports both Streamlit Cloud (st.secrets) and local (.env)
@@ -478,11 +482,11 @@ def load_extractions() -> pd.DataFrame:
                     lambda v: v if isinstance(v, list) else ([v] if v is not None and v == v else [])
                 )
 
-        # Parse timestamp
+        # Parse timestamp (stored as UTC) and convert to Israel local time
         if "extraction_timestamp" in df.columns:
             df["extraction_timestamp"] = pd.to_datetime(
                 df["extraction_timestamp"], errors="coerce", utc=True
-            )
+            ).dt.tz_convert(ISRAEL_TZ)
 
         return df
 
@@ -524,7 +528,9 @@ def load_conversations() -> pd.DataFrame:
         df_conv = pd.DataFrame(rows)
         for col in ["updated_at", "extraction_timestamp"]:
             if col in df_conv.columns:
-                df_conv[col] = pd.to_datetime(df_conv[col], errors="coerce", utc=True)
+                df_conv[col] = pd.to_datetime(
+                    df_conv[col], errors="coerce", utc=True
+                ).dt.tz_convert(ISRAEL_TZ)
         return df_conv
     except Exception as e:
         st.error(f"Error loading conversations: {e}")
@@ -1134,6 +1140,6 @@ with st.expander("Show full conversations", expanded=False):
 # ---------------------------------------------------------------------------
 st.markdown("---")
 st.caption(
-    f"Dashboard last refreshed: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} · "
+    f"Dashboard last refreshed: {datetime.now(ZoneInfo(ISRAEL_TZ)).strftime('%Y-%m-%d %H:%M')} (Israel time) · "
     f"Data source: Postgres ({PG_DB}@{PG_HOST})"
 )
