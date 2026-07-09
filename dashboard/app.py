@@ -13,6 +13,7 @@ import sys
 import time
 import threading
 import io
+import re
 import hmac
 import calendar
 import streamlit as st
@@ -284,18 +285,44 @@ def load_cost_export() -> tuple[pd.DataFrame, str, dict]:
         if not csv_blobs:
             return pd.DataFrame(), "no_blobs", context
 
-        # Cost exports are cumulative snapshots. Using multiple files causes
-        # overcounting, so we only read the latest snapshot.
-        latest_blob = max(
-            csv_blobs,
-            key=lambda b: b.last_modified or datetime.min.replace(tzinfo=timezone.utc),
-        )
-        context["latest_blob"] = latest_blob.name
-        data = container_client.download_blob(latest_blob.name).readall()
-        df_blob = pd.read_csv(io.BytesIO(data))
-        if df_blob.empty:
+        # Azure Cost Management exports write one dated folder per run/month,
+        # e.g. ".../cost/daily/20260701-20260731/<guid>/part_0.csv". Within a
+        # single month folder the file is a cumulative snapshot, so reading more
+        # than one file from the SAME month overcounts. To build a real trend we
+        # therefore keep the latest file PER month folder and concatenate across
+        # months. If the paths have no dated folder (single-month setups), all
+        # blobs fall into one bucket and we behave exactly as before.
+        month_re = re.compile(r"(\d{8}-\d{8})")
+
+        def _month_key(name: str) -> str:
+            match = month_re.search(name)
+            return match.group(1) if match else "__single__"
+
+        latest_per_month: dict[str, object] = {}
+        for blob in csv_blobs:
+            key = _month_key(blob.name)
+            current = latest_per_month.get(key)
+            blob_modified = blob.last_modified or datetime.min.replace(tzinfo=timezone.utc)
+            if current is None or blob_modified > (
+                current.last_modified or datetime.min.replace(tzinfo=timezone.utc)
+            ):
+                latest_per_month[key] = blob
+
+        selected_blobs = list(latest_per_month.values())
+        context["month_folders"] = sorted(latest_per_month.keys())
+        context["files_read"] = [b.name for b in selected_blobs]
+
+        frames = []
+        for blob in selected_blobs:
+            data = container_client.download_blob(blob.name).readall()
+            part = pd.read_csv(io.BytesIO(data))
+            if not part.empty:
+                frames.append(part)
+
+        if not frames:
             return pd.DataFrame(), "no_blobs", context
 
+        df_blob = pd.concat(frames, ignore_index=True)
         return df_blob, "ok", context
     except Exception as exc:
         context["error"] = str(exc)
@@ -639,14 +666,30 @@ else:
         .sort_values("month")
         .tail(12)
     )
-    fig_cost = px.line(
+    # Use a formatted month label so the x-axis always shows clean month names
+    # (e.g. "Jul 2026") instead of Plotly zooming into microseconds when there
+    # is only a single month of data. A bar chart also reads better than a line
+    # until there are several months to form an actual trend.
+    monthly = monthly.copy()
+    monthly["month_label"] = monthly["month"].dt.strftime("%b %Y")
+
+    if len(monthly) < 2:
+        st.caption(
+            "Only one month of cost data so far — a trend line will appear once "
+            "there are at least two months of data."
+        )
+
+    fig_cost = px.bar(
         monthly,
-        x="month",
+        x="month_label",
         y="cost",
-        markers=True,
+        text="cost",
         title="Monthly Cost Trend (Last 12 Months)",
-        labels={"month": "Month", "cost": "Cost (USD)"},
+        labels={"month_label": "Month", "cost": "Cost (USD)"},
+        color_discrete_sequence=["#3498db"],
     )
+    fig_cost.update_traces(texttemplate="$%{text:.2f}", textposition="outside")
+    fig_cost.update_layout(xaxis_type="category", bargap=0.4)
     st.plotly_chart(fig_cost, width="stretch")
 
 # ---------------------------------------------------------------------------
