@@ -101,15 +101,19 @@ def setup_chatbot():
     print(get_display(sys_msg.content))
 
     # Initialize the Azure LLM.
-    # Low temperature keeps replies grounded in the system prompt / context
-    # and reduces made-up content. gpt-5 / o-series models only accept the
-    # default (1); pass a custom temperature only when the model supports it.
+    # Low temperature keeps replies grounded in the system prompt / context and
+    # reduces made-up content. NOTE: langchain_openai defaults temperature to
+    # 0.7 when unset, and gpt-5 / o-series reject anything other than 1, so we
+    # set temperature EXPLICITLY in both cases (never omit it).
     llm_kwargs = {
         "api_version": env_vars["api_version"],
         "azure_deployment": env_vars["deployment_name"],
     }
     if _model_supports_custom_temperature(env_vars["deployment_name"]):
         llm_kwargs["temperature"] = 0.2
+    else:
+        # gpt-5 / o-series only accept the default value of 1
+        llm_kwargs["temperature"] = 1
     llm = AzureChatOpenAI(**llm_kwargs)
 
     # Define the chatbot prompt

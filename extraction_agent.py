@@ -117,8 +117,9 @@ async def extract_conversation_insights(session_id: str, messages: List[BaseMess
         ])
         
         # Initialize Azure OpenAI with timeout.
-        # Some models (e.g. the gpt-5 family) reject any temperature other than
-        # the default of 1, so only pass a custom temperature when supported.
+        # NOTE: langchain_openai defaults temperature to 0.7 when it is not set,
+        # and models like gpt-5 / o-series reject anything other than 1. So we
+        # must set temperature EXPLICITLY in both cases (never omit it).
         deployment_name = _get_extraction_deployment_name()
         llm_kwargs = {
             "api_version": os.getenv("AZURE_OPENAI_API_VERSION"),
@@ -128,6 +129,9 @@ async def extract_conversation_insights(session_id: str, messages: List[BaseMess
         if _model_supports_custom_temperature(deployment_name):
             # Lower temperature for more consistent extraction
             llm_kwargs["temperature"] = 0.1
+        else:
+            # gpt-5 / o-series only accept the default value of 1
+            llm_kwargs["temperature"] = 1
         llm = AzureChatOpenAI(**llm_kwargs)
         
         chain = extraction_prompt | llm
