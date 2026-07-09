@@ -194,6 +194,19 @@ def _get_extraction_deployment_name() -> str | None:
     return os.getenv("EXTRACTION_DEPLOYMENT_NAME") or os.getenv("DEPLOYMENT_NAME")
 
 
+def _model_supports_custom_temperature(deployment_name: str | None) -> bool:
+    """Whether a deployment accepts a non-default ``temperature``.
+
+    Reasoning models such as the gpt-5 / o-series family only support the
+    default temperature of 1 and return a 400 error for any other value.
+    """
+    if not deployment_name:
+        return True
+    name = deployment_name.lower()
+    unsupported_prefixes = ("gpt-5", "o1", "o3", "o4")
+    return not name.startswith(unsupported_prefixes)
+
+
 async def extract_conversation_insights(session_id: str, messages: List[BaseMessage], session_metadata: Dict[str, Any] = None) -> Dict[str, Any]:
     print(f"🔍 Starting extraction for session {session_id} with {len(messages)} messages")
     try:
@@ -257,12 +270,19 @@ async def extract_conversation_insights(session_id: str, messages: List[BaseMess
             ("human", "שיחה:\n{conversation}")
         ])
         
-        # Initialize Azure OpenAI with timeout
-        llm = AzureChatOpenAI(
-            api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
-            azure_deployment=_get_extraction_deployment_name(),
-            request_timeout=60  # 60 second timeout
-        )
+        # Initialize Azure OpenAI with timeout.
+        # Some models (e.g. the gpt-5 family) reject any temperature other than
+        # the default of 1, so only pass a custom temperature when supported.
+        deployment_name = _get_extraction_deployment_name()
+        llm_kwargs = {
+            "api_version": os.getenv("AZURE_OPENAI_API_VERSION"),
+            "azure_deployment": deployment_name,
+            "request_timeout": 60,  # 60 second timeout
+        }
+        if _model_supports_custom_temperature(deployment_name):
+            # Lower temperature for more consistent extraction
+            llm_kwargs["temperature"] = 0.1
+        llm = AzureChatOpenAI(**llm_kwargs)
         
         chain = extraction_prompt | llm
         
