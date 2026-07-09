@@ -15,6 +15,9 @@ import threading
 import io
 import hmac
 import calendar
+import json
+import urllib.request
+import urllib.error
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -111,6 +114,67 @@ def _get_cost_secret(key: str, env_key: str, default: str = "") -> str:
             return val
 
     return os.getenv(env_key, default)
+
+
+@st.cache_data(ttl=600)
+def load_available_azure_credits() -> tuple[float | None, str]:
+    """Fetch live available Azure credits from Billing AvailableBalances API.
+
+    Returns:
+        (available_balance_usd, status)
+        status in {"ok", "not_configured", "forbidden", "error"}
+    """
+    billing_account = _get_cost_secret("billing_account_id", "COST_BILLING_ACCOUNT_ID")
+    billing_profile = _get_cost_secret("billing_profile_id", "COST_BILLING_PROFILE_ID")
+
+    if not billing_account or not billing_profile:
+        return None, "not_configured"
+
+    endpoint = (
+        "https://management.azure.com/providers/Microsoft.Billing/"
+        f"billingAccounts/{billing_account}/billingProfiles/{billing_profile}/"
+        "availableBalances/default?api-version=2024-04-01"
+    )
+
+    try:
+        credential = _get_azure_credential()
+        token = credential.get_token("https://management.azure.com/.default").token
+        request = urllib.request.Request(
+            endpoint,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+        )
+        with urllib.request.urlopen(request, timeout=20) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+
+        props = payload.get("properties", {}) if isinstance(payload, dict) else {}
+        balances = props.get("balances", []) if isinstance(props, dict) else []
+        if not isinstance(balances, list):
+            return None, "error"
+
+        usd_balance = next(
+            (
+                b.get("amount")
+                for b in balances
+                if isinstance(b, dict) and str(b.get("currencyCode", "")).upper() == "USD"
+            ),
+            None,
+        )
+
+        if usd_balance is None and balances:
+            first = balances[0]
+            if isinstance(first, dict):
+                usd_balance = first.get("amount")
+
+        return (float(usd_balance), "ok") if usd_balance is not None else (None, "error")
+    except urllib.error.HTTPError as exc:
+        if exc.code in (401, 403):
+            return None, "forbidden"
+        return None, "error"
+    except Exception:
+        return None, "error"
 
 
 def _get_auth_secret(key: str, env_key: str, default: str = "") -> str:
@@ -581,7 +645,8 @@ if cost_df.empty:
         st.info(
             "Cost export is not configured yet. Add Streamlit secrets under [cost]: "
             "storage_account, container (default cost-exports), directory (default cost/daily), "
-            "and optional monthly_budget_usd / annual_credit_usd."
+            "and optional monthly_budget_usd / annual_credit_usd. For live portal credits, add "
+            "billing_account_id and billing_profile_id and grant Billing AvailableBalances read access."
         )
     elif cost_status == "no_blobs":
         st.warning(
@@ -628,6 +693,10 @@ else:
     annual_credit = float(annual_credit_raw) if annual_credit_raw else None
     remaining_annual_credit = (annual_credit - ytd_cost) if annual_credit is not None else None
 
+    live_available_credit, live_credit_status = load_available_azure_credits()
+    if live_available_credit is not None:
+        remaining_annual_credit = live_available_credit
+
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("MTD Cost (USD)", f"${mtd_cost:,.2f}")
     c2.metric("Linear Forecast EOM (USD)", f"${forecast_eom:,.2f}")
@@ -641,6 +710,14 @@ else:
         c5, c6 = st.columns(2)
         c5.metric("Annual Credit (USD)", f"${annual_credit:,.2f}")
         c6.metric("YTD Cost (USD)", f"${ytd_cost:,.2f}")
+
+    if live_credit_status == "ok":
+        st.caption("Remaining Annual Credit is sourced live from Azure Billing Available Balances.")
+    elif live_credit_status == "forbidden":
+        st.caption(
+            "Live Azure credit balance is not accessible with current billing permissions. "
+            "Showing calculated value instead (if configured)."
+        )
 
     monthly = (
         cost_df.assign(month=pd.to_datetime(cost_df["date"].dt.strftime("%Y-%m-01"), utc=True))
