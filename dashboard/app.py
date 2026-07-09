@@ -276,26 +276,23 @@ def load_cost_export() -> tuple[pd.DataFrame, str, dict]:
         if not blobs:
             return pd.DataFrame(), "no_blobs", context
 
-        # Load newest files first and cap to avoid heavy dashboard startup.
-        blobs = sorted(blobs, key=lambda b: b.last_modified or datetime.min.replace(tzinfo=timezone.utc), reverse=True)[:20]
-
-        frames = []
-        for blob in blobs:
-            if not blob.name.lower().endswith(".csv"):
-                continue
-            data = container_client.download_blob(blob.name).readall()
-            try:
-                df_blob = pd.read_csv(io.BytesIO(data))
-                if not df_blob.empty:
-                    frames.append(df_blob)
-            except Exception:
-                # Skip malformed files and continue.
-                continue
-
-        if not frames:
+        csv_blobs = [b for b in blobs if b.name.lower().endswith(".csv")]
+        if not csv_blobs:
             return pd.DataFrame(), "no_blobs", context
 
-        return pd.concat(frames, ignore_index=True), "ok", context
+        # Cost exports are cumulative snapshots. Using multiple files causes
+        # overcounting, so we only read the latest snapshot.
+        latest_blob = max(
+            csv_blobs,
+            key=lambda b: b.last_modified or datetime.min.replace(tzinfo=timezone.utc),
+        )
+        context["latest_blob"] = latest_blob.name
+        data = container_client.download_blob(latest_blob.name).readall()
+        df_blob = pd.read_csv(io.BytesIO(data))
+        if df_blob.empty:
+            return pd.DataFrame(), "no_blobs", context
+
+        return df_blob, "ok", context
     except Exception as exc:
         context["error"] = str(exc)
         return pd.DataFrame(), "error", context
@@ -633,7 +630,7 @@ else:
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("MTD Cost (USD)", f"${mtd_cost:,.2f}")
-    c2.metric("Forecast EOM (USD)", f"${forecast_eom:,.2f}")
+    c2.metric("Linear Forecast EOM (USD)", f"${forecast_eom:,.2f}")
     c3.metric("Remaining Budget (USD)", f"${remaining:,.2f}" if remaining is not None else "-")
     c4.metric(
         "Remaining Annual Credit (USD)",
@@ -646,7 +643,7 @@ else:
         c6.metric("YTD Cost (USD)", f"${ytd_cost:,.2f}")
 
     monthly = (
-        cost_df.assign(month=cost_df["date"].dt.to_period("M").dt.to_timestamp())
+        cost_df.assign(month=pd.to_datetime(cost_df["date"].dt.strftime("%Y-%m-01"), utc=True))
         .groupby("month", as_index=False)["cost"]
         .sum()
         .sort_values("month")
