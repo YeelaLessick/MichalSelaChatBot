@@ -15,11 +15,15 @@ import threading
 import io
 import hmac
 import calendar
+import json
+import urllib.request
+import urllib.error
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 import psycopg
 from psycopg.rows import dict_row
 from dotenv import load_dotenv
@@ -28,6 +32,9 @@ from collections import Counter
 # Add parent directory to path so we can import config
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from config import MULTI_VALUE_FIELDS
+
+# All timestamps are stored in UTC but displayed in Israel local time.
+ISRAEL_TZ = "Asia/Jerusalem"
 
 # ---------------------------------------------------------------------------
 # Configuration – supports both Streamlit Cloud (st.secrets) and local (.env)
@@ -111,6 +118,91 @@ def _get_cost_secret(key: str, env_key: str, default: str = "") -> str:
             return val
 
     return os.getenv(env_key, default)
+
+
+@st.cache_data(ttl=600)
+def load_available_azure_credits() -> tuple[float | None, str, str]:
+    """Fetch live available Azure credits from Billing AvailableBalances API.
+
+    Returns:
+        (available_balance_usd, status, details)
+        status in {"ok", "not_configured", "forbidden", "error"}
+    """
+    billing_account = _get_cost_secret("billing_account_id", "COST_BILLING_ACCOUNT_ID")
+    billing_profile = _get_cost_secret("billing_profile_id", "COST_BILLING_PROFILE_ID")
+
+    if not billing_account or not billing_profile:
+        missing = []
+        if not billing_account:
+            missing.append("billing_account_id")
+        if not billing_profile:
+            missing.append("billing_profile_id")
+        return None, "not_configured", f"Missing [cost] secret(s): {', '.join(missing)}"
+
+    endpoint = (
+        "https://management.azure.com/providers/Microsoft.Billing/"
+        f"billingAccounts/{billing_account}/billingProfiles/{billing_profile}/"
+        "availableBalances/default?api-version=2024-04-01"
+    )
+
+    try:
+        credential = _get_azure_credential()
+        token = credential.get_token("https://management.azure.com/.default").token
+        request = urllib.request.Request(
+            endpoint,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+        )
+        with urllib.request.urlopen(request, timeout=20) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+
+        props = payload.get("properties", {}) if isinstance(payload, dict) else {}
+        balances = props.get("balances", []) if isinstance(props, dict) else []
+
+        usd_balance = None
+        if isinstance(balances, list):
+            usd_balance = next(
+                (
+                    b.get("amount")
+                    for b in balances
+                    if isinstance(b, dict) and str(b.get("currencyCode", "")).upper() == "USD"
+                ),
+                None,
+            )
+            if usd_balance is None and balances:
+                first = balances[0]
+                if isinstance(first, dict):
+                    usd_balance = first.get("amount")
+
+        # Support alternate payload shapes from Billing API versions.
+        if usd_balance is None and isinstance(props, dict):
+            balance_obj = props.get("balance")
+            if isinstance(balance_obj, dict):
+                usd_balance = balance_obj.get("amount")
+            if usd_balance is None:
+                usd_balance = props.get("amount")
+
+        if usd_balance is None and isinstance(payload, dict):
+            usd_balance = payload.get("amount")
+
+        if usd_balance is None:
+            top_keys = list(payload.keys())[:8] if isinstance(payload, dict) else []
+            return None, "error", f"Could not find amount in Billing API response. Keys: {top_keys}"
+
+        return float(usd_balance), "ok", "Live Azure Billing Available Balance"
+    except urllib.error.HTTPError as exc:
+        body = ""
+        try:
+            body = exc.read().decode("utf-8", errors="ignore")[:300]
+        except Exception:
+            pass
+        if exc.code in (401, 403):
+            return None, "forbidden", f"Billing API denied access ({exc.code}). {body}"
+        return None, "error", f"Billing API HTTP error ({exc.code}). {body}"
+    except Exception as exc:
+        return None, "error", f"Billing API call failed: {exc}"
 
 
 def _get_auth_secret(key: str, env_key: str, default: str = "") -> str:
@@ -276,26 +368,23 @@ def load_cost_export() -> tuple[pd.DataFrame, str, dict]:
         if not blobs:
             return pd.DataFrame(), "no_blobs", context
 
-        # Load newest files first and cap to avoid heavy dashboard startup.
-        blobs = sorted(blobs, key=lambda b: b.last_modified or datetime.min.replace(tzinfo=timezone.utc), reverse=True)[:20]
-
-        frames = []
-        for blob in blobs:
-            if not blob.name.lower().endswith(".csv"):
-                continue
-            data = container_client.download_blob(blob.name).readall()
-            try:
-                df_blob = pd.read_csv(io.BytesIO(data))
-                if not df_blob.empty:
-                    frames.append(df_blob)
-            except Exception:
-                # Skip malformed files and continue.
-                continue
-
-        if not frames:
+        csv_blobs = [b for b in blobs if b.name.lower().endswith(".csv")]
+        if not csv_blobs:
             return pd.DataFrame(), "no_blobs", context
 
-        return pd.concat(frames, ignore_index=True), "ok", context
+        # Cost exports are cumulative snapshots. Using multiple files causes
+        # overcounting, so we only read the latest snapshot.
+        latest_blob = max(
+            csv_blobs,
+            key=lambda b: b.last_modified or datetime.min.replace(tzinfo=timezone.utc),
+        )
+        context["latest_blob"] = latest_blob.name
+        data = container_client.download_blob(latest_blob.name).readall()
+        df_blob = pd.read_csv(io.BytesIO(data))
+        if df_blob.empty:
+            return pd.DataFrame(), "no_blobs", context
+
+        return df_blob, "ok", context
     except Exception as exc:
         context["error"] = str(exc)
         return pd.DataFrame(), "error", context
@@ -394,11 +483,11 @@ def load_extractions() -> pd.DataFrame:
                     lambda v: v if isinstance(v, list) else ([v] if v is not None and v == v else [])
                 )
 
-        # Parse timestamp
+        # Parse timestamp (stored as UTC) and convert to Israel local time
         if "extraction_timestamp" in df.columns:
             df["extraction_timestamp"] = pd.to_datetime(
                 df["extraction_timestamp"], errors="coerce", utc=True
-            )
+            ).dt.tz_convert(ISRAEL_TZ)
 
         return df
 
@@ -440,7 +529,9 @@ def load_conversations() -> pd.DataFrame:
         df_conv = pd.DataFrame(rows)
         for col in ["updated_at", "extraction_timestamp"]:
             if col in df_conv.columns:
-                df_conv[col] = pd.to_datetime(df_conv[col], errors="coerce", utc=True)
+                df_conv[col] = pd.to_datetime(
+                    df_conv[col], errors="coerce", utc=True
+                ).dt.tz_convert(ISRAEL_TZ)
         return df_conv
     except Exception as e:
         st.error(f"Error loading conversations: {e}")
@@ -585,7 +676,8 @@ if cost_df.empty:
         st.info(
             "Cost export is not configured yet. Add Streamlit secrets under [cost]: "
             "storage_account, container (default cost-exports), directory (default cost/daily), "
-            "and optional monthly_budget_usd."
+            "and optional monthly_budget_usd / annual_credit_usd. For live portal credits, add "
+            "billing_account_id and billing_profile_id and grant Billing AvailableBalances read access."
         )
     elif cost_status == "no_blobs":
         st.warning(
@@ -613,10 +705,14 @@ if cost_df.empty:
 else:
     now_utc = datetime.now(timezone.utc)
     month_start = now_utc.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    year_start = now_utc.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
     month_mask = (cost_df["date"] >= month_start) & (cost_df["date"] <= now_utc)
+    year_mask = (cost_df["date"] >= year_start) & (cost_df["date"] <= now_utc)
     mtd_df = cost_df[month_mask]
+    ytd_df = cost_df[year_mask]
 
     mtd_cost = float(mtd_df["cost"].sum()) if not mtd_df.empty else 0.0
+    ytd_cost = float(ytd_df["cost"].sum()) if not ytd_df.empty else 0.0
     days_elapsed = max(1, now_utc.day)
     days_in_month = calendar.monthrange(now_utc.year, now_utc.month)[1]
     forecast_eom = (mtd_cost / days_elapsed) * days_in_month
@@ -624,14 +720,49 @@ else:
     monthly_budget_raw = _get_cost_secret("monthly_budget_usd", "COST_MONTHLY_BUDGET_USD", "125")
     monthly_budget = float(monthly_budget_raw) if monthly_budget_raw else 125.0
     remaining = (monthly_budget - mtd_cost) if monthly_budget is not None else None
+    annual_credit_raw = _get_cost_secret("annual_credit_usd", "COST_ANNUAL_CREDIT_USD", "")
+    annual_credit = float(annual_credit_raw) if annual_credit_raw else None
+    remaining_annual_credit = (annual_credit - ytd_cost) if annual_credit is not None else None
 
-    c1, c2, c3 = st.columns(3)
+    live_available_credit, live_credit_status, live_credit_details = load_available_azure_credits()
+    if live_available_credit is not None:
+        remaining_annual_credit = live_available_credit
+
+    c1, c2, c3, c4 = st.columns(4)
     c1.metric("MTD Cost (USD)", f"${mtd_cost:,.2f}")
-    c2.metric("Forecast EOM (USD)", f"${forecast_eom:,.2f}")
+    c2.metric("Linear Forecast EOM (USD)", f"${forecast_eom:,.2f}")
     c3.metric("Remaining Budget (USD)", f"${remaining:,.2f}" if remaining is not None else "-")
+    c4.metric(
+        "Remaining Annual Credit (USD)",
+        f"${remaining_annual_credit:,.2f}" if remaining_annual_credit is not None else "-",
+    )
+
+    if annual_credit is not None:
+        c5, c6 = st.columns(2)
+        c5.metric("Annual Credit (USD)", f"${annual_credit:,.2f}")
+        c6.metric("YTD Cost (USD)", f"${ytd_cost:,.2f}")
+
+    if live_credit_status == "ok":
+        st.caption("Remaining Annual Credit is sourced live from Azure Billing Available Balances.")
+        st.caption(f"Credit source: {live_credit_details}")
+    elif live_credit_status == "not_configured":
+        st.warning(
+            "Live Azure credit balance is not configured in dashboard secrets. "
+            "Add [cost].billing_account_id and [cost].billing_profile_id."
+        )
+        st.caption(live_credit_details)
+    elif live_credit_status == "forbidden":
+        st.warning(
+            "Live Azure credit balance is not accessible with current billing permissions. "
+            "Showing calculated value instead (if configured)."
+        )
+        st.caption(live_credit_details)
+    elif live_credit_status == "error":
+        st.warning("Live Azure credit balance lookup failed. Showing fallback value if configured.")
+        st.caption(live_credit_details)
 
     monthly = (
-        cost_df.assign(month=cost_df["date"].dt.to_period("M").dt.to_timestamp())
+        cost_df.assign(month=pd.to_datetime(cost_df["date"].dt.strftime("%Y-%m-01"), utc=True))
         .groupby("month", as_index=False)["cost"]
         .sum()
         .sort_values("month")
@@ -956,10 +1087,9 @@ with st.expander("Show full conversations", expanded=False):
     if conversations_df.empty:
         st.info("No stored conversations found.")
     else:
-        visible_session_ids = set(df["session_id"].dropna().astype(str))
-        filtered_conversations = conversations_df[
-            conversations_df["session_id"].astype(str).isin(visible_session_ids)
-        ].copy()
+        # Keep the conversation viewer independent from extraction filters so
+        # active / not-yet-extracted chats are still visible.
+        filtered_conversations = conversations_df.copy()
 
         if filtered_conversations.empty:
             st.info("No conversations match the current filters.")
@@ -974,7 +1104,7 @@ with st.expander("Show full conversations", expanded=False):
             ]
             available_summary_cols = [c for c in summary_cols if c in filtered_conversations.columns]
             st.dataframe(
-                filtered_conversations[available_summary_cols],
+                filtered_conversations[available_summary_cols].sort_values("updated_at", ascending=False),
                 width="stretch",
                 hide_index=True,
             )
@@ -1011,6 +1141,6 @@ with st.expander("Show full conversations", expanded=False):
 # ---------------------------------------------------------------------------
 st.markdown("---")
 st.caption(
-    f"Dashboard last refreshed: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} · "
+    f"Dashboard last refreshed: {datetime.now(ZoneInfo(ISRAEL_TZ)).strftime('%Y-%m-%d %H:%M')} (Israel time) · "
     f"Data source: Postgres ({PG_DB}@{PG_HOST})"
 )
