@@ -21,7 +21,7 @@ from db import (
     connect_to_db,
 )
 from datetime import datetime, timedelta
-from extraction_agent import extract_with_retry
+from extraction_agent import _model_supports_custom_temperature, extract_with_retry
 
 import logging
 import traceback
@@ -100,11 +100,17 @@ def setup_chatbot():
 
     print(get_display(sys_msg.content))
 
-    # Initialize the Azure LLM
-    llm = AzureChatOpenAI(
-        api_version=env_vars["api_version"],
-        azure_deployment=env_vars["deployment_name"],
-    )
+    # Initialize the Azure LLM.
+    # Low temperature keeps replies grounded in the system prompt / context
+    # and reduces made-up content. gpt-5 / o-series models only accept the
+    # default (1); pass a custom temperature only when the model supports it.
+    llm_kwargs = {
+        "api_version": env_vars["api_version"],
+        "azure_deployment": env_vars["deployment_name"],
+    }
+    if _model_supports_custom_temperature(env_vars["deployment_name"]):
+        llm_kwargs["temperature"] = 0.2
+    llm = AzureChatOpenAI(**llm_kwargs)
 
     # Define the chatbot prompt
     prompt = ChatPromptTemplate.from_messages(
@@ -305,7 +311,7 @@ async def chat(session_id, user_input):
 
         response = await chatbot.ainvoke(
             {"user_input": user_input},
-            config={"configurable": {"session_id": session_id}, "temperature": 0.5, "top_p": 0.7},
+            config={"configurable": {"session_id": session_id}},
         )
         
         # Update last_modified timestamp after successful chat
