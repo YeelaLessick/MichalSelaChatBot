@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import time
 from collections.abc import Mapping, Sequence
@@ -78,15 +79,41 @@ def _get_aad_token() -> str:
         if cached and _token_cache["expires_at"] - now > 300:
             return cached
 
-        from azure.identity import DefaultAzureCredential
+        from azure.identity import ClientSecretCredential, DefaultAzureCredential
 
-        credential = DefaultAzureCredential(
-            managed_identity_client_id=PostgresConfig.AZURE_CLIENT_ID
-        )
-        access = credential.get_token(PostgresConfig.AAD_SCOPE)
-        _token_cache["token"] = access.token
-        _token_cache["expires_at"] = float(access.expires_on)
-        return access.token
+        tenant_id = os.environ.get("AZURE_TENANT_ID")
+        client_id = PostgresConfig.AZURE_CLIENT_ID or os.environ.get("AZURE_CLIENT_ID")
+        client_secret = os.environ.get("AZURE_CLIENT_SECRET")
+
+        # Prefer an explicit service principal when the app is configured for it.
+        if tenant_id and client_id and client_secret:
+            credential = ClientSecretCredential(
+                tenant_id=tenant_id,
+                client_id=client_id,
+                client_secret=client_secret,
+            )
+        else:
+            credential = DefaultAzureCredential(
+                managed_identity_client_id=client_id or None
+            )
+
+        try:
+            access = credential.get_token(PostgresConfig.AAD_SCOPE)
+            _token_cache["token"] = access.token
+            _token_cache["expires_at"] = float(access.expires_on)
+            return access.token
+        except Exception as exc:
+            if PostgresConfig.PASSWORD:
+                logger.warning(
+                    "AAD token acquisition failed for Postgres; falling back to POSTGRES_PASSWORD: %s",
+                    exc,
+                )
+                return PostgresConfig.PASSWORD
+            raise RuntimeError(
+                "Postgres AAD authentication failed and POSTGRES_PASSWORD is not set. "
+                "Configure AZURE_TENANT_ID/AZURE_CLIENT_ID/AZURE_CLIENT_SECRET for a service principal, "
+                "or enable a managed identity for the app and grant it access to Postgres."
+            ) from exc
 
 
 def _get_password() -> str | None:
