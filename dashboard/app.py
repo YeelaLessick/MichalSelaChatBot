@@ -1,5 +1,5 @@
 """
-Michal Sela ChatBot – Extraction Statistics Dashboard
+Michal Sela ChatBot – Statistics Dashboard
 =====================================================
 A Streamlit dashboard that queries the Postgres `extractions` table
 and displays interactive statistics about conversation insights.
@@ -539,7 +539,7 @@ st.set_page_config(
 
 require_dashboard_password()
 
-st.title("💜 Michal Sela Chatbot – Extraction Statistics")
+st.title("💜 Michal Sela Chatbot – Statistics")
 st.caption("Live statistics from conversation extractions stored in Postgres")
 
 # ---------------------------------------------------------------------------
@@ -600,6 +600,7 @@ if st.sidebar.button("🔒 Lock Dashboard"):
 
 st.sidebar.markdown("---")
 st.sidebar.info(f"Showing **{len(df)}** extraction records")
+st.sidebar.markdown("[📄 Go to Raw Extraction Data](#raw-extraction-data)")
 
 # ---------------------------------------------------------------------------
 # Cost Overview (from Azure Cost export in Blob Storage)
@@ -959,7 +960,7 @@ else:
 # ---------------------------------------------------------------------------
 # Raw Data Table
 # ---------------------------------------------------------------------------
-st.header("📄 Raw Extraction Data")
+st.header("📄 Raw Extraction Data", anchor="raw-extraction-data")
 with st.expander("Show raw data table", expanded=False):
     display_cols = [
         "session_id",
