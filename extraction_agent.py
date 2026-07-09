@@ -110,7 +110,6 @@ async def infer_conversation_ending_with_agent(
     local_llm = llm or AzureChatOpenAI(
         api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
         azure_deployment=os.getenv("DEPLOYMENT_NAME"),
-        temperature=0,
         request_timeout=20,
     )
 
@@ -262,7 +261,6 @@ async def extract_conversation_insights(session_id: str, messages: List[BaseMess
         llm = AzureChatOpenAI(
             api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
             azure_deployment=_get_extraction_deployment_name(),
-            temperature=0.1,  # Lower temperature for more consistent extraction
             request_timeout=60  # 60 second timeout
         )
         
