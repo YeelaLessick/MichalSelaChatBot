@@ -316,6 +316,15 @@ async def chat(session_id, user_input):
         if response is None or not hasattr(response, 'content') or response.content is None:
             logger.warning(f"⚠️ Warning: Empty response from chatbot for session {session_id}")
             return "משהו השתבש, אנא נסי שוב 💜"
+
+        # Persist rolling conversation snapshots so dashboards can show active
+        # sessions even before the explicit end-of-conversation marker.
+        try:
+            session_data = session_storage.get(session_id)
+            if session_data and session_data.get("history"):
+                save_conversation(session_id, list(session_data["history"].messages))
+        except Exception as persist_err:
+            logger.warning(f"⚠️ Could not persist rolling conversation for {session_id}: {persist_err}")
         
         #safe_response = escape_special_chars(response.content)
         return response.content

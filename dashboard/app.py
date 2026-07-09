@@ -1080,10 +1080,9 @@ with st.expander("Show full conversations", expanded=False):
     if conversations_df.empty:
         st.info("No stored conversations found.")
     else:
-        visible_session_ids = set(df["session_id"].dropna().astype(str))
-        filtered_conversations = conversations_df[
-            conversations_df["session_id"].astype(str).isin(visible_session_ids)
-        ].copy()
+        # Keep the conversation viewer independent from extraction filters so
+        # active / not-yet-extracted chats are still visible.
+        filtered_conversations = conversations_df.copy()
 
         if filtered_conversations.empty:
             st.info("No conversations match the current filters.")
@@ -1098,7 +1097,7 @@ with st.expander("Show full conversations", expanded=False):
             ]
             available_summary_cols = [c for c in summary_cols if c in filtered_conversations.columns]
             st.dataframe(
-                filtered_conversations[available_summary_cols],
+                filtered_conversations[available_summary_cols].sort_values("updated_at", ascending=False),
                 width="stretch",
                 hide_index=True,
             )
