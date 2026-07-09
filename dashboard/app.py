@@ -117,18 +117,23 @@ def _get_cost_secret(key: str, env_key: str, default: str = "") -> str:
 
 
 @st.cache_data(ttl=600)
-def load_available_azure_credits() -> tuple[float | None, str]:
+def load_available_azure_credits() -> tuple[float | None, str, str]:
     """Fetch live available Azure credits from Billing AvailableBalances API.
 
     Returns:
-        (available_balance_usd, status)
+        (available_balance_usd, status, details)
         status in {"ok", "not_configured", "forbidden", "error"}
     """
     billing_account = _get_cost_secret("billing_account_id", "COST_BILLING_ACCOUNT_ID")
     billing_profile = _get_cost_secret("billing_profile_id", "COST_BILLING_PROFILE_ID")
 
     if not billing_account or not billing_profile:
-        return None, "not_configured"
+        missing = []
+        if not billing_account:
+            missing.append("billing_account_id")
+        if not billing_profile:
+            missing.append("billing_profile_id")
+        return None, "not_configured", f"Missing [cost] secret(s): {', '.join(missing)}"
 
     endpoint = (
         "https://management.azure.com/providers/Microsoft.Billing/"
@@ -151,30 +156,49 @@ def load_available_azure_credits() -> tuple[float | None, str]:
 
         props = payload.get("properties", {}) if isinstance(payload, dict) else {}
         balances = props.get("balances", []) if isinstance(props, dict) else []
-        if not isinstance(balances, list):
-            return None, "error"
 
-        usd_balance = next(
-            (
-                b.get("amount")
-                for b in balances
-                if isinstance(b, dict) and str(b.get("currencyCode", "")).upper() == "USD"
-            ),
-            None,
-        )
+        usd_balance = None
+        if isinstance(balances, list):
+            usd_balance = next(
+                (
+                    b.get("amount")
+                    for b in balances
+                    if isinstance(b, dict) and str(b.get("currencyCode", "")).upper() == "USD"
+                ),
+                None,
+            )
+            if usd_balance is None and balances:
+                first = balances[0]
+                if isinstance(first, dict):
+                    usd_balance = first.get("amount")
 
-        if usd_balance is None and balances:
-            first = balances[0]
-            if isinstance(first, dict):
-                usd_balance = first.get("amount")
+        # Support alternate payload shapes from Billing API versions.
+        if usd_balance is None and isinstance(props, dict):
+            balance_obj = props.get("balance")
+            if isinstance(balance_obj, dict):
+                usd_balance = balance_obj.get("amount")
+            if usd_balance is None:
+                usd_balance = props.get("amount")
 
-        return (float(usd_balance), "ok") if usd_balance is not None else (None, "error")
+        if usd_balance is None and isinstance(payload, dict):
+            usd_balance = payload.get("amount")
+
+        if usd_balance is None:
+            top_keys = list(payload.keys())[:8] if isinstance(payload, dict) else []
+            return None, "error", f"Could not find amount in Billing API response. Keys: {top_keys}"
+
+        return float(usd_balance), "ok", "Live Azure Billing Available Balance"
     except urllib.error.HTTPError as exc:
+        body = ""
+        try:
+            body = exc.read().decode("utf-8", errors="ignore")[:300]
+        except Exception:
+            pass
         if exc.code in (401, 403):
-            return None, "forbidden"
-        return None, "error"
-    except Exception:
-        return None, "error"
+            return None, "forbidden", f"Billing API denied access ({exc.code}). {body}"
+        return None, "error", f"Billing API HTTP error ({exc.code}). {body}"
+    except Exception as exc:
+        return None, "error", f"Billing API call failed: {exc}"
 
 
 def _get_auth_secret(key: str, env_key: str, default: str = "") -> str:
@@ -693,7 +717,7 @@ else:
     annual_credit = float(annual_credit_raw) if annual_credit_raw else None
     remaining_annual_credit = (annual_credit - ytd_cost) if annual_credit is not None else None
 
-    live_available_credit, live_credit_status = load_available_azure_credits()
+    live_available_credit, live_credit_status, live_credit_details = load_available_azure_credits()
     if live_available_credit is not None:
         remaining_annual_credit = live_available_credit
 
@@ -713,11 +737,22 @@ else:
 
     if live_credit_status == "ok":
         st.caption("Remaining Annual Credit is sourced live from Azure Billing Available Balances.")
+        st.caption(f"Credit source: {live_credit_details}")
+    elif live_credit_status == "not_configured":
+        st.warning(
+            "Live Azure credit balance is not configured in dashboard secrets. "
+            "Add [cost].billing_account_id and [cost].billing_profile_id."
+        )
+        st.caption(live_credit_details)
     elif live_credit_status == "forbidden":
-        st.caption(
+        st.warning(
             "Live Azure credit balance is not accessible with current billing permissions. "
             "Showing calculated value instead (if configured)."
         )
+        st.caption(live_credit_details)
+    elif live_credit_status == "error":
+        st.warning("Live Azure credit balance lookup failed. Showing fallback value if configured.")
+        st.caption(live_credit_details)
 
     monthly = (
         cost_df.assign(month=pd.to_datetime(cost_df["date"].dt.strftime("%Y-%m-01"), utc=True))
