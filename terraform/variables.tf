@@ -85,24 +85,6 @@ variable "azure_openai_api_version" {
   default     = "2025-01-01-preview"
 }
 
-# Cosmos DB variables
-variable "cosmosdb_name" {
-  description = "Name of the Cosmos DB account"
-  type        = string
-}
-
-variable "cosmosdb_enable_free_tier" {
-  description = "Enable free tier for Cosmos DB"
-  type        = bool
-  default     = false
-}
-
-variable "cosmosdb_ip_range_filter" {
-  description = "IP range filter for Cosmos DB"
-  type        = string
-  default     = ""
-}
-
 # PostgreSQL Flexible Server variables (replacement for Cosmos DB)
 variable "postgres_server_name" {
   description = "Name of the PostgreSQL Flexible Server (must be globally unique)"
@@ -213,6 +195,62 @@ variable "bot_identity_name" {
 variable "openai_identity_name" {
   description = "Name of the OpenAI managed identity"
   type        = string
+}
+
+# Weekly summary email settings (App Service app settings)
+variable "weekly_summary_enabled" {
+  description = "Enable weekly summary scheduler (auto-disabled if SMTP settings are missing)"
+  type        = bool
+  default     = true
+}
+
+variable "weekly_summary_recipient" {
+  description = "Recipient email for weekly summary"
+  type        = string
+  default     = "michalsela@info.com"
+}
+
+variable "weekly_summary_timezone" {
+  description = "IANA timezone used by the weekly summary scheduler"
+  type        = string
+  default     = "Asia/Jerusalem"
+}
+
+variable "weekly_summary_send_hour" {
+  description = "Weekly summary send hour (0-23)"
+  type        = number
+  default     = 9
+}
+
+variable "smtp_server" {
+  description = "SMTP host"
+  type        = string
+  default     = null
+}
+
+variable "smtp_port" {
+  description = "SMTP port"
+  type        = number
+  default     = 587
+}
+
+variable "smtp_username" {
+  description = "SMTP username"
+  type        = string
+  default     = null
+}
+
+variable "smtp_password" {
+  description = "SMTP password"
+  type        = string
+  sensitive   = true
+  default     = null
+}
+
+variable "smtp_from" {
+  description = "From email address"
+  type        = string
+  default     = null
 }
 
 # Tags

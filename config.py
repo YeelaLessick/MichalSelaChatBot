@@ -57,14 +57,12 @@ class PostgresConfig:
 class EmailSummaryConfig:
     """Weekly email summary configuration."""
 
-    ENABLED = os.environ.get("DAILY_SUMMARY_ENABLED", "true").lower() in ("1", "true", "yes")
-    RECIPIENT = os.environ.get("DAILY_SUMMARY_RECIPIENT", "zoe5559@gmail.com") #"info@michalsela.org.il")
-    TIMEZONE = os.environ.get("DAILY_SUMMARY_TIMEZONE", "Asia/Jerusalem")
+    RECIPIENT = os.environ.get("WEEKLY_SUMMARY_RECIPIENT", "zoe5559@gmail.com") #"info@michalsela.org.il")
+    TIMEZONE = os.environ.get("WEEKLY_SUMMARY_TIMEZONE", "Asia/Jerusalem")
     # Day of week to send on. Monday=0 ... Sunday=6. Default: Sunday.
     SEND_WEEKDAY = int(os.environ.get("WEEKLY_SUMMARY_SEND_WEEKDAY", "6"))
-    SEND_HOUR = int(os.environ.get("DAILY_SUMMARY_SEND_HOUR", "9"))
-    SEND_MINUTE = int(os.environ.get("DAILY_SUMMARY_SEND_MINUTE", "0"))
-    # Debug mode: send the summary every hour instead of weekly (for testing).
+    SEND_HOUR = int(os.environ.get("WEEKLY_SUMMARY_SEND_HOUR", "9"))
+    # Debug mode: send the summary every 4 hours instead of weekly (for testing).
     DEBUG_MODE = os.environ.get("SUMMARY_DEBUG_MODE", "false").lower() in ("1", "true", "yes")
 
     # Azure Communication Services Email

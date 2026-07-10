@@ -25,12 +25,7 @@ repo_branch = "develop"  # Use develop branch for dev environment
 openai_account_name     = "michalsela-openai-dev"
 openai_deployment_name  = "gpt-4.1"
 
-# Cosmos DB
-cosmosdb_name           = "michalsela-cosmos-dev"
-cosmosdb_enable_free_tier = false
-cosmosdb_ip_range_filter = ""
-
-# PostgreSQL Flexible Server (replaces Cosmos DB - ~$13/mo on B_Standard_B1ms)
+# PostgreSQL Flexible Server (~$13/mo on B_Standard_B1ms)
 postgres_server_name   = "michalsela-pg-dev"
 postgres_location      = "westeurope"
 postgres_database_name = "chatbot"
@@ -56,6 +51,19 @@ subnet_service_endpoints   = ["Microsoft.Storage", "Microsoft.CognitiveServices"
 app_service_identity_name  = "michalsela-webapp-dev"
 bot_identity_name         = "michalSelaBot-dev"
 openai_identity_name      = "michalsela-openai-dev"
+
+# Weekly summary email settings
+weekly_summary_enabled      = true
+weekly_summary_recipient    = "michalsela@info.com"
+weekly_summary_timezone     = "Asia/Jerusalem"
+weekly_summary_send_hour    = 9
+
+# SMTP settings (uncomment and set real values to enable email delivery)
+# smtp_server   = "smtp.example.com"
+# smtp_port     = 587
+# smtp_username = "mailer@example.com"
+# smtp_password = "<set-via-secure-secret>"
+# smtp_from     = "mailer@example.com"
 
 # Tags
 tags = {

@@ -25,12 +25,7 @@ repo_branch = "main"
 openai_account_name     = "michalsela-openai"
 openai_deployment_name  = "gpt-4.1"
 
-# Cosmos DB
-cosmosdb_name           = "michalsela-cosmosdb"
-cosmosdb_enable_free_tier = false
-cosmosdb_ip_range_filter = ""
-
-# PostgreSQL Flexible Server (replaces Cosmos DB)
+# PostgreSQL Flexible Server
 postgres_server_name   = "michalsela-pg"
 postgres_location      = "westeurope"
 postgres_database_name = "chatbot"

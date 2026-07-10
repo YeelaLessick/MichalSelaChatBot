@@ -322,10 +322,6 @@ def _validate_email_config() -> tuple[bool, str]:
 
 def send_weekly_conversation_summary(now_utc: datetime | None = None) -> bool:
     """Generate and send the weekly summary email via Azure Communication Services."""
-    if not EmailSummaryConfig.ENABLED:
-        logger.info("Weekly summary mail is disabled.")
-        return False
-
     ok, message = _validate_email_config()
     if not ok:
         logger.warning("Weekly summary mail skipped. %s", message)
