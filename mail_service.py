@@ -175,6 +175,139 @@ def build_weekly_summary_email(
     return "".join(html)
 
 
+# Conversation-ending tag that triggers an immediate emergency notification.
+EMERGENCY_ENDING = "נציגה תחזור"
+
+
+def _build_transcript_html(messages: list[Any] | None) -> str:
+    """Render the raw conversation transcript as HTML, if messages are provided."""
+    if not messages:
+        return ""
+
+    rows: list[str] = []
+    for msg in messages:
+        content = str(getattr(msg, "content", "") or "").strip()
+        if not content:
+            continue
+        msg_type = str(getattr(msg, "type", "") or "").strip().lower()
+        speaker = "פונה" if msg_type in {"human", "user"} else "בוט"
+        rows.append(
+            "<tr>"
+            f"<td style='padding:4px 10px;font-weight:bold;white-space:nowrap;vertical-align:top;'>{speaker}</td>"
+            f"<td style='padding:4px 10px;'>{content}</td>"
+            "</tr>"
+        )
+
+    if not rows:
+        return ""
+
+    return (
+        "<h3>תמליל השיחה</h3>"
+        "<table style='border-collapse:collapse;width:100%;'>"
+        f"<tbody>{''.join(rows)}</tbody>"
+        "</table>"
+    )
+
+
+def build_emergency_callback_email(
+    session_id: str,
+    fields: dict[str, Any],
+    metadata: dict[str, Any] | None,
+    messages: list[Any] | None = None,
+) -> str:
+    """Build the HTML body for an emergency human-callback notification."""
+    metadata = metadata if isinstance(metadata, dict) else {}
+    phone_number = metadata.get("phone_number") or "-"
+    channel = metadata.get("channel") or "-"
+
+    detail_rows = "".join(
+        (
+            "<tr>"
+            f"<td style='padding:4px 10px;font-weight:bold;white-space:nowrap;'>{label}</td>"
+            f"<td style='padding:4px 10px;'>{_format_value(fields.get(key))}</td>"
+            "</tr>"
+        )
+        for key, label in FIELD_LABELS
+    )
+
+    transcript_html = _build_transcript_html(messages)
+
+    html = [
+        "<html><body dir='rtl' style='font-family:Arial,sans-serif;'>",
+        "<h2 style='color:#b00000;'>🚨 בקשה לחזרת נציגה אנושית</h2>",
+        "<p>הפונה ביקשה שנציג/ה אנושי/ת יחזור/תחזור אליה. יש לטפל בהקדם.</p>",
+        "<table style='border-collapse:collapse;width:100%;'>"
+        "<tbody>"
+        f"<tr><td style='padding:4px 10px;font-weight:bold;white-space:nowrap;'>מזהה שיחה</td>"
+        f"<td style='padding:4px 10px;'>{session_id}</td></tr>"
+        f"<tr><td style='padding:4px 10px;font-weight:bold;white-space:nowrap;'>מספר טלפון</td>"
+        f"<td style='padding:4px 10px;'>{_format_value(phone_number)}</td></tr>"
+        f"<tr><td style='padding:4px 10px;font-weight:bold;white-space:nowrap;'>ערוץ</td>"
+        f"<td style='padding:4px 10px;'>{_format_value(channel)}</td></tr>"
+        "</tbody></table>",
+        "<hr/>",
+        "<h3>פרטי השיחה</h3>",
+        "<table style='border-collapse:collapse;width:100%;'>"
+        f"<tbody>{detail_rows}</tbody>"
+        "</table>",
+    ]
+
+    if transcript_html:
+        html.append("<hr/>")
+        html.append(transcript_html)
+
+    html.append("</body></html>")
+    return "".join(html)
+
+
+def send_emergency_callback_email(
+    session_id: str,
+    extraction: dict[str, Any] | None,
+    session_metadata: dict[str, Any] | None = None,
+    messages: list[Any] | None = None,
+) -> bool:
+    """Send an immediate emergency email when a caller asks for a human representative.
+
+    Returns True when an email was sent, False otherwise (misconfigured or the
+    conversation did not end with a callback request).
+    """
+    fields = _extract_fields(extraction)
+    if fields.get("conversation_ending") != EMERGENCY_ENDING:
+        return False
+
+    ok, message = _validate_email_config()
+    if not ok:
+        logger.warning("Emergency callback mail skipped. %s", message)
+        return False
+
+    html_body = build_emergency_callback_email(session_id, fields, session_metadata, messages)
+    subject = "🚨 בקשה דחופה לחזרת נציגה אנושית"
+
+    email_client = EmailClient.from_connection_string(EmailSummaryConfig.CONNECTION_STRING)
+    email_message = {
+        "senderAddress": EmailSummaryConfig.SENDER_ADDRESS,
+        "content": {
+            "subject": subject,
+            "html": html_body,
+        },
+        "recipients": {
+            "to": [{"address": EmailSummaryConfig.RECIPIENT}],
+        },
+    }
+
+    poller = email_client.begin_send(email_message)
+    result = poller.result()
+
+    status = result.get("status") if isinstance(result, dict) else result
+    logger.info(
+        "Emergency callback mail sent to %s for session %s (status=%s)",
+        EmailSummaryConfig.RECIPIENT,
+        session_id,
+        status,
+    )
+    return True
+
+
 def _validate_email_config() -> tuple[bool, str]:
     missing = []
     if not EmailSummaryConfig.CONNECTION_STRING:
