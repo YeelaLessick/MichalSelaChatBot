@@ -85,7 +85,7 @@ variable "azure_openai_api_version" {
   default     = "2025-01-01-preview"
 }
 
-# PostgreSQL Flexible Server variables (replacement for Cosmos DB)
+# PostgreSQL Flexible Server variables
 variable "postgres_server_name" {
   description = "Name of the PostgreSQL Flexible Server (must be globally unique)"
   type        = string

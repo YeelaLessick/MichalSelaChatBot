@@ -184,7 +184,7 @@ REFERRED_TO_OPTIONS = [
 
 YES_NO_OPTIONS = ["כן", "לא", "לא ידוע"]
 
-# Fields that accept multiple values (stored as arrays in Cosmos DB)
+# Fields that accept multiple values (stored as arrays)
 MULTI_VALUE_FIELDS = {"inquiry_subject", "referred_to"}
 
 URGENCY_LEVEL_OPTIONS = [

@@ -1,8 +1,6 @@
 """
 Postgres-backed persistence for the Michal Sela chatbot.
 
-Replaces the previous Cosmos DB implementation in `cosmosdb.py`.
-
 Two tables (both in the same database):
 
     conversations(session_id PK, conversation JSONB, updated_at)
@@ -173,14 +171,11 @@ def ensure_schema() -> None:
 
 
 def connect_to_db() -> None:
-    """Initialise schema. Call once at startup.
-
-    Kept as a function for parity with the old `connect_to_cosmos()` API.
-    """
+    """Initialise schema. Call once at startup."""
     ensure_schema()
 
 
-# --- Message serialisation (kept identical to old cosmosdb.py) ---------------
+# --- Message serialisation ---------------------------------------------------
 
 
 def messages_to_json(messages):

@@ -23,7 +23,7 @@ from config import (
 # Load environment variables
 load_dotenv()
 
-# Mapping of Hebrew field names to English keys for Cosmos DB
+# Mapping of Hebrew field names to English keys for storage
 FIELD_NAME_MAPPING = {
     "זמן השיחה": "conversation_time",
     "נושא הפניה": "inquiry_subject",
@@ -306,7 +306,7 @@ async def extract_conversation_insights(session_id: str, messages: List[BaseMess
                 # Try to parse as JSON
                 hebrew_data = json.loads(result.content)
                 
-                # Map Hebrew keys to English keys for Cosmos DB
+                # Map Hebrew keys to English keys for storage
                 extracted_data = {}
                 for hebrew_key, value in hebrew_data.items():
                     english_key = FIELD_NAME_MAPPING.get(hebrew_key, hebrew_key)
