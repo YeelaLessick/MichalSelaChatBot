@@ -76,9 +76,23 @@ module "app_service" {
   repo_branch = var.repo_branch
 
   # Additional app settings
-  additional_app_settings = {
-    ENVIRONMENT = var.environment
-  }
+  additional_app_settings = merge(
+    {
+      ENVIRONMENT = var.environment
+
+      # Auto-disable scheduler until SMTP settings are fully configured.
+      WEEKLY_SUMMARY_RECIPIENT   = var.weekly_summary_recipient
+      WEEKLY_SUMMARY_TIMEZONE    = var.weekly_summary_timezone
+      WEEKLY_SUMMARY_SEND_HOUR   = tostring(var.weekly_summary_send_hour)
+    },
+    var.smtp_server != null && var.smtp_username != null && var.smtp_password != null && var.smtp_from != null ? {
+      SMTP_SERVER   = var.smtp_server
+      SMTP_PORT     = tostring(var.smtp_port)
+      SMTP_USERNAME = var.smtp_username
+      SMTP_PASSWORD = var.smtp_password
+      SMTP_FROM     = var.smtp_from
+    } : {}
+  )
 
   depends_on = [module.resource_group, module.azure_bot, module.azure_openai, module.virtual_network, module.managed_identity_bot, module.managed_identity_app_service, module.postgres]
 }
@@ -94,23 +108,8 @@ module "azure_openai" {
   depends_on = [module.resource_group]
 }
 
-module "cosmosdb" {
-  source = "./cosmosdb"
-
-  cosmosdb_name       = var.cosmosdb_name
-  location           = "israelcentral"
-  resource_group_name = module.resource_group.resource_group_name
-  enable_free_tier   = var.cosmosdb_enable_free_tier
-  ip_range_filter    = var.cosmosdb_ip_range_filter
-  tags               = var.tags
-
-  depends_on = [module.resource_group]
-}
-
 # -----------------------------------------------------------------------------
-# Azure Database for PostgreSQL - Flexible Server (replaces Cosmos DB)
-# Keep `module.cosmosdb` deployed during migration; remove it after data has
-# been copied over (see scripts/migrate_cosmos_to_postgres.py).
+# Azure Database for PostgreSQL - Flexible Server
 # -----------------------------------------------------------------------------
 module "postgres" {
   source = "./postgres"

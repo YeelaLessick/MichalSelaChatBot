@@ -1,9 +1,9 @@
 # =============================================================================
 # Azure Database for PostgreSQL - Flexible Server
 # =============================================================================
-# Replaces Cosmos DB for storing chatbot conversations and extractions.
+# Stores chatbot conversations and extractions.
 #
-# Cost model: Burstable B1ms (~$13-18/month) vs. Cosmos DB (~$1,200/month)
+# Cost model: Burstable B1ms (~$13-18/month)
 # Storage:    32 GB SSD, plenty for JSONB conversation history
 # Auth:       Microsoft Entra ID (passwordless) - uses managed identity from
 #             App Service to fetch a short-lived token at runtime.

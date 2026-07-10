@@ -410,6 +410,7 @@ def load_extractions() -> pd.DataFrame:
                 "referred_to":          fields.get("referred_to"),
                 "wants_human_callback": fields.get("wants_human_callback"),
                 "urgency_level":        fields.get("urgency_level"),
+                "conversation_ending":  fields.get("conversation_ending"),
             })
 
         df = pd.DataFrame(rows)

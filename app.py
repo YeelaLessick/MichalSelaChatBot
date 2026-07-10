@@ -14,6 +14,7 @@ from bot_framework_handler import handle_bot_framework_message
 from whatsapp_handler import handle_whatsapp_webhook, handle_whatsapp_options
 from config import DefaultConfig
 from session_manager import cleanup_expired_sessions, get_active_session_count
+from weekly_scheduler import start_weekly_summary_scheduler
 
 # Configure logging - suppress verbose Azure SDK logs
 logging.basicConfig(
@@ -45,6 +46,7 @@ adapter = CloudAdapter(ConfigurationBotFrameworkAuthentication(CONFIG))
 
 # Initialize chatbot
 setup_chatbot()
+start_weekly_summary_scheduler()
 
 # Background job for session cleanup
 def session_cleanup_job():
