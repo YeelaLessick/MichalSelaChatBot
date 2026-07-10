@@ -22,8 +22,11 @@ class DefaultConfig:
     APP_TENANTID = os.environ.get("MicrosoftAppTenantId", "")
     
     # Session cleanup configuration
-    SESSION_CLEANUP_INTERVAL_MINUTES = int(os.environ.get("SESSION_CLEANUP_INTERVAL_MINUTES", "720"))
-    SESSION_TIMEOUT_MINUTES = int(os.environ.get("SESSION_TIMEOUT_MINUTES", "1440"))
+    # A session ends automatically after SESSION_TIMEOUT_MINUTES of inactivity
+    # (no new messages), which triggers extraction just like ending with "end".
+    # The cleanup job checks every SESSION_CLEANUP_INTERVAL_MINUTES.
+    SESSION_CLEANUP_INTERVAL_MINUTES = int(os.environ.get("SESSION_CLEANUP_INTERVAL_MINUTES", "5"))
+    SESSION_TIMEOUT_MINUTES = int(os.environ.get("SESSION_TIMEOUT_MINUTES", "30"))
 
 
 class PostgresConfig:
