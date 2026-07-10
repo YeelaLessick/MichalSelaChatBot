@@ -30,8 +30,6 @@ FIELD_LABELS: list[tuple[str, str]] = [
     ("caller_age", "גיל הפונה"),
     ("relationship_to_threat", "קרבה לגורם המאיים / לשורדת"),
     ("referred_to", "לאן הפנינו"),
-    ("contacted_referral", "האם פנתה לגורם"),
-    ("received_good_response", "האם קיבלה מענה טוב"),
     ("wants_human_callback", "רוצה שנציגה תחזור"),
     ("conversation_time", "זמן השיחה"),
 ]

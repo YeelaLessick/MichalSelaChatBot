@@ -31,8 +31,6 @@ FIELD_NAME_MAPPING = {
     "מין הפונה": "caller_gender",
     "קרבה לגורם המאיים או לשורדת האלימות": "relationship_to_threat",
     "לאן הפנינו": "referred_to",
-    "האם פנתה לאן שהפנינו": "contacted_referral",
-    "האם קיבלה מענה טוב": "received_good_response",
     "האם היא רוצה שנציג אנושי יחזור אליה": "wants_human_callback",
     "רמת דחיפות": "urgency_level",
     "איך הסתיימה השיחה": "conversation_ending",
@@ -242,8 +240,6 @@ async def extract_conversation_insights(session_id: str, messages: List[BaseMess
 - "מין הפונה": [{_fmt(CALLER_GENDER_OPTIONS)}]
 - "קרבה לגורם המאיים או לשורדת האלימות": [{_fmt(RELATIONSHIP_OPTIONS)}]
 - "לאן הפנינו" (מערך — ניתן לבחור מספר ערכים): [{_fmt(REFERRED_TO_OPTIONS)}]
-- "האם פנתה לאן שהפנינו": [{_fmt(YES_NO_OPTIONS)}]
-- "האם קיבלה מענה טוב": [{_fmt(YES_NO_OPTIONS)}]
 - "האם היא רוצה שנציג אנושי יחזור אליה": [{_fmt(YES_NO_OPTIONS)}]
 - "רמת דחיפות": [{_fmt(URGENCY_LEVEL_OPTIONS)}]
 - "איך הסתיימה השיחה": [{_fmt(CONVERSATION_ENDING_OPTIONS)}]
@@ -260,8 +256,6 @@ async def extract_conversation_insights(session_id: str, messages: List[BaseMess
     "מין הפונה": "...",
     "קרבה לגורם המאיים או לשורדת האלימות": "...",
     "לאן הפנינו": ["...", "..."],
-    "האם פנתה לאן שהפנינו": "...",
-    "האם קיבלה מענה טוב": "...",
     "האם היא רוצה שנציג אנושי יחזור אליה": "...",
     "רמת דחיפות": "...",
     "איך הסתיימה השיחה": "..."
