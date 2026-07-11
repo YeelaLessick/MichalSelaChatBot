@@ -22,6 +22,7 @@ from db import (
 )
 from datetime import datetime, timedelta
 from extraction_agent import _model_supports_custom_temperature, extract_with_retry
+from mail_service import send_emergency_callback_email
 
 import logging
 import traceback
@@ -271,6 +272,17 @@ def _run_background_extraction(session_id, messages, metadata=None):
         )
         save_extraction(session_id, extraction_result, session_metadata=metadata)
         logger.info(f"✅ Background extraction completed for session {session_id}")
+
+        # Send an emergency mail if the caller asked for a human representative.
+        try:
+            send_emergency_callback_email(
+                session_id,
+                extraction_result,
+                session_metadata=metadata,
+                messages=messages,
+            )
+        except Exception as e:
+            logger.error(f"❌ Failed to send emergency callback email for {session_id}: {e}")
     except Exception as e:
         logger.error(f"❌ Background extraction failed for {session_id}: {e}")
 
