@@ -21,7 +21,11 @@ from db import (
     connect_to_db,
 )
 from datetime import datetime, timedelta
-from extraction_agent import _model_supports_custom_temperature, extract_with_retry
+from extraction_agent import (
+    _model_supports_custom_temperature,
+    extract_with_retry,
+    detect_human_agent_request,
+)
 from mail_service import send_emergency_callback_email
 
 import logging
@@ -272,19 +276,38 @@ def _run_background_extraction(session_id, messages, metadata=None):
         )
         save_extraction(session_id, extraction_result, session_metadata=metadata)
         logger.info(f"✅ Background extraction completed for session {session_id}")
-
-        # Send an emergency mail if the caller asked for a human representative.
-        try:
-            send_emergency_callback_email(
-                session_id,
-                extraction_result,
-                session_metadata=metadata,
-                messages=messages,
-            )
-        except Exception as e:
-            logger.error(f"❌ Failed to send emergency callback email for {session_id}: {e}")
     except Exception as e:
         logger.error(f"❌ Background extraction failed for {session_id}: {e}")
+
+
+def _check_and_send_emergency(session_id, messages, metadata=None):
+    """After a message, detect (via agent) whether the caller asked for a human
+    representative and, if so, send the emergency mail once per session."""
+    try:
+        asked_for_human = asyncio.run(detect_human_agent_request(messages))
+        if not asked_for_human:
+            return
+
+        # Deduplicate: only one emergency mail per session.
+        session_data = session_storage.get(session_id)
+        if session_data is not None:
+            if session_data.get("emergency_sent"):
+                return
+            session_data["emergency_sent"] = True
+
+        logger.info(f"🚨 Human representative requested in session {session_id} — sending emergency mail")
+
+        extraction_result = asyncio.run(
+            extract_with_retry(session_id, messages, session_metadata=metadata)
+        )
+        send_emergency_callback_email(
+            session_id,
+            extraction_result,
+            session_metadata=metadata,
+            messages=messages,
+        )
+    except Exception as e:
+        logger.error(f"❌ Emergency check/send failed for {session_id}: {e}")
 
 
 async def chat(session_id, user_input):
@@ -347,7 +370,27 @@ async def chat(session_id, user_input):
                 save_conversation(session_id, list(session_data["history"].messages))
         except Exception as persist_err:
             logger.warning(f"⚠️ Could not persist rolling conversation for {session_id}: {persist_err}")
-        
+
+        # After every message, check (in the background) whether the caller asked
+        # for a human representative and, if so, send an emergency mail once.
+        try:
+            session_data = session_storage.get(session_id)
+            if session_data and not session_data.get("emergency_sent"):
+                messages_copy = list(session_data["history"].messages)
+                metadata_copy = {
+                    "created_at": session_data.get("created_at"),
+                    "last_modified": session_data.get("last_modified"),
+                    "channel": session_data.get("channel", "unknown"),
+                    "phone_number": session_data.get("phone_number"),
+                }
+                threading.Thread(
+                    target=_check_and_send_emergency,
+                    args=(session_id, messages_copy, metadata_copy),
+                    daemon=True,
+                ).start()
+        except Exception as emergency_err:
+            logger.warning(f"⚠️ Could not run emergency check for {session_id}: {emergency_err}")
+
         #safe_response = escape_special_chars(response.content)
         return response.content
     

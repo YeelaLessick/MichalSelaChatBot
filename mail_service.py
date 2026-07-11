@@ -206,10 +206,6 @@ def build_weekly_summary_email(
     return "".join(html)
 
 
-# Conversation-ending tag that triggers an immediate emergency notification.
-EMERGENCY_ENDING = "נציגה תחזור"
-
-
 def _build_transcript_html(messages: list[Any] | None) -> str:
     """Render the raw conversation transcript as HTML, if messages are provided."""
     if not messages:
@@ -297,14 +293,14 @@ def send_emergency_callback_email(
     session_metadata: dict[str, Any] | None = None,
     messages: list[Any] | None = None,
 ) -> bool:
-    """Send an immediate emergency email when a caller asks for a human representative.
+    """Send an immediate emergency email because the caller asked for a human.
 
-    Returns True when an email was sent, False otherwise (misconfigured or the
-    conversation did not end with a callback request).
+    Called mid-conversation once the agent has detected that the caller
+    requested a human representative.
+
+    Returns True when an email was sent, False otherwise.
     """
     fields = _extract_fields(extraction)
-    if fields.get("conversation_ending") != EMERGENCY_ENDING:
-        return False
 
     ok, message = _validate_email_config()
     if not ok:
@@ -330,11 +326,22 @@ def send_emergency_callback_email(
     result = poller.result()
 
     status = result.get("status") if isinstance(result, dict) else result
+
+    meta = session_metadata if isinstance(session_metadata, dict) else {}
+    source = _format_source(meta.get("channel"))
+    phone_number = _resolve_phone_number({"session_id": session_id, "metadata": meta})
+    details = ", ".join(
+        f"{label}={_format_value(fields.get(key))}" for key, label in FIELD_LABELS
+    )
     logger.info(
-        "Emergency callback mail sent to %s for session %s (status=%s)",
+        "🚨 Caller asked for a human — emergency mail sent to %s for session %s "
+        "(status=%s) | מקור=%s, טלפון=%s, %s",
         EmailSummaryConfig.RECIPIENT,
         session_id,
         status,
+        source,
+        phone_number,
+        details,
     )
     return True
 
