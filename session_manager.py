@@ -11,7 +11,6 @@ from langchain_core.chat_history import BaseChatMessageHistory
 
 from extraction_agent import extract_with_retry
 from db import save_conversation, save_extraction
-from mail_service import send_emergency_callback_email
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -77,17 +76,6 @@ def persist_session_data(
             )
             # Still save the partial/error result so nothing is lost
             save_extraction(session_id, extraction_result, session_metadata=metadata)
-
-        # --- Emergency notification: caller asked for a human representative ---
-        try:
-            send_emergency_callback_email(
-                session_id,
-                extraction_result,
-                session_metadata=metadata,
-                messages=messages,
-            )
-        except Exception as e:
-            logger.error(f"❌ Failed to send emergency callback email for {session_id}: {e}")
     except Exception as e:
         logger.error(f"❌ Failed to extract/store data for {session_id}: {e}")
 

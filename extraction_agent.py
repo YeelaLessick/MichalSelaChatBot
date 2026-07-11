@@ -187,6 +187,70 @@ async def resolve_conversation_ending(
     return infer_conversation_ending(messages)
 
 
+async def detect_human_agent_request(
+    messages: List[BaseMessage], llm: Optional[AzureChatOpenAI] = None
+) -> bool:
+    """Return True when the caller explicitly asked for a human representative.
+
+    Used to trigger an emergency notification mid-conversation (after every
+    message), not only when the conversation ends.
+    """
+    if not messages:
+        return False
+
+    recent = [
+        m for m in messages[-8:]
+        if str(getattr(m, "content", "") or "").strip()
+    ]
+    if not recent:
+        return False
+
+    conversation_text = "\n".join(
+        f"{getattr(m, 'type', 'unknown')}: {getattr(m, 'content', '')}"
+        for m in recent
+    )
+
+    deployment_name = _get_extraction_deployment_name()
+    if llm is None:
+        llm_kwargs = {
+            "api_version": os.getenv("AZURE_OPENAI_API_VERSION"),
+            "azure_deployment": deployment_name,
+            "request_timeout": 20,
+        }
+        llm_kwargs["temperature"] = (
+            0.1 if _model_supports_custom_temperature(deployment_name) else 1
+        )
+        llm = AzureChatOpenAI(**llm_kwargs)
+
+    prompt = ChatPromptTemplate.from_messages([
+        (
+            "system",
+            """את מזהה האם הפונה ביקשה במפורש לדבר עם נציג/ה אנושי/ת או שנציג/ה אנושי/ת יחזור/תחזור אליה.
+החזירי JSON בלבד בפורמט: {{"asked_for_human": true/false}}
+
+- החזירי true רק אם הפונה ביקשה במפורש נציג/ה אנושי/ת, לדבר עם בן אדם אמיתי, או שיחזרו אליה.
+- כולל ניסוחים כמו "אני רוצה לדבר עם נציגה", "תעבירו אותי לבן אדם", "שיחזרו אליי".
+- בכל מקרה אחר החזירי false.""",
+        ),
+        ("human", "השיחה:\n{conversation}"),
+    ])
+
+    try:
+        result = await asyncio.wait_for(
+            (prompt | llm).ainvoke({"conversation": conversation_text}),
+            timeout=20,
+        )
+        raw = str(getattr(result, "content", "") or "").strip()
+        if raw.startswith("```"):
+            raw = raw.strip("`")
+            if raw.lower().startswith("json"):
+                raw = raw[4:].strip()
+        parsed = json.loads(raw)
+        return bool(parsed.get("asked_for_human", False))
+    except Exception:
+        return False
+
+
 def _get_extraction_deployment_name() -> str | None:
     """Prefer a dedicated extraction deployment, then fall back to the chat deployment."""
     return os.getenv("EXTRACTION_DEPLOYMENT_NAME") or os.getenv("DEPLOYMENT_NAME")
