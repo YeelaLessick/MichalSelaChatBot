@@ -22,8 +22,11 @@ class DefaultConfig:
     APP_TENANTID = os.environ.get("MicrosoftAppTenantId", "")
     
     # Session cleanup configuration
-    SESSION_CLEANUP_INTERVAL_MINUTES = int(os.environ.get("SESSION_CLEANUP_INTERVAL_MINUTES", "720"))
-    SESSION_TIMEOUT_MINUTES = int(os.environ.get("SESSION_TIMEOUT_MINUTES", "1440"))
+    # A session ends automatically after SESSION_TIMEOUT_MINUTES of inactivity
+    # (no new messages), which triggers extraction just like ending with "end".
+    # The cleanup job checks every SESSION_CLEANUP_INTERVAL_MINUTES.
+    SESSION_CLEANUP_INTERVAL_MINUTES = int(os.environ.get("SESSION_CLEANUP_INTERVAL_MINUTES", "5"))
+    SESSION_TIMEOUT_MINUTES = int(os.environ.get("SESSION_TIMEOUT_MINUTES", "30"))
 
 
 class PostgresConfig:
@@ -82,8 +85,6 @@ EXTRACTION_FIELDS = [
     "מין הפונה",
     "קרבה לגורם המאיים או לשורדת האלימות",
     "לאן הפנינו",
-    "האם פנתה לאן שהפנינו",
-    "האם קיבלה מענה טוב",
     "האם היא רוצה שנציג אנושי יחזור אליה",
     "איך הסתיימה השיחה",
 ]
@@ -184,7 +185,7 @@ REFERRED_TO_OPTIONS = [
 
 YES_NO_OPTIONS = ["כן", "לא", "לא ידוע"]
 
-# Fields that accept multiple values (stored as arrays in Cosmos DB)
+# Fields that accept multiple values (stored as arrays)
 MULTI_VALUE_FIELDS = {"inquiry_subject", "referred_to"}
 
 URGENCY_LEVEL_OPTIONS = [

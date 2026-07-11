@@ -22,6 +22,35 @@ CONVERSATION_ENDING_ORDER = [
 ]
 UNKNOWN_ENDING = "לא ידוע"
 
+# Human-readable Hebrew labels for the conversation source (channel).
+CHANNEL_LABELS = {
+    "whatsapp": "וואטסאפ",
+    "bot_framework": "צ׳אט",
+    "unknown": "לא ידוע",
+}
+
+
+def _format_source(channel: Any) -> str:
+    """Map a raw channel value to a readable Hebrew conversation-source label."""
+    if not channel:
+        return "-"
+    key = str(channel).strip().lower()
+    return CHANNEL_LABELS.get(key, str(channel))
+
+
+def _resolve_phone_number(item: dict[str, Any]) -> str:
+    """Phone number from metadata, falling back to the whatsapp_ session id."""
+    phone = item.get("metadata", {}).get("phone_number")
+    if phone and str(phone).strip():
+        return str(phone).strip()
+
+    session_id = str(item.get("session_id") or "")
+    if session_id.startswith("whatsapp_"):
+        raw = session_id[len("whatsapp_"):]
+        # Format is whatsapp_{phone}_{uuid8}; drop the optional uuid suffix.
+        return raw.rsplit("_", 1)[0] if "_" in raw else raw
+    return "-"
+
 # Fields shown for every conversation, in display order (English key -> Hebrew label).
 FIELD_LABELS: list[tuple[str, str]] = [
     ("urgency_level", "רמת דחיפות"),
@@ -30,8 +59,6 @@ FIELD_LABELS: list[tuple[str, str]] = [
     ("caller_age", "גיל הפונה"),
     ("relationship_to_threat", "קרבה לגורם המאיים / לשורדת"),
     ("referred_to", "לאן הפנינו"),
-    ("contacted_referral", "האם פנתה לגורם"),
-    ("received_good_response", "האם קיבלה מענה טוב"),
     ("wants_human_callback", "רוצה שנציגה תחזור"),
     ("conversation_time", "זמן השיחה"),
 ]
@@ -59,6 +86,8 @@ def _format_value(value: Any) -> str:
 def _build_conversation_card(item: dict[str, Any]) -> str:
     fields = item["fields"]
     created_local = item["created_local"].strftime("%Y-%m-%d %H:%M")
+    source = _format_source(item.get("metadata", {}).get("channel"))
+    phone_number = _resolve_phone_number(item)
 
     detail_rows = "".join(
         (
@@ -73,7 +102,9 @@ def _build_conversation_card(item: dict[str, Any]) -> str:
     return (
         "<div style='border:1px solid #ccc;border-radius:6px;padding:10px;margin:10px 0;'>"
         f"<p style='margin:0 0 6px;'><strong>מזהה שיחה:</strong> {item['session_id']} "
-        f"&nbsp;|&nbsp; <strong>תאריך:</strong> {created_local}</p>"
+        f"&nbsp;|&nbsp; <strong>תאריך:</strong> {created_local} "
+        f"&nbsp;|&nbsp; <strong>מקור השיחה:</strong> {source} "
+        f"&nbsp;|&nbsp; <strong>מספר טלפון:</strong> {phone_number}</p>"
         "<table style='border-collapse:collapse;width:100%;'>"
         f"<tbody>{detail_rows}</tbody>"
         "</table>"
@@ -218,7 +249,7 @@ def build_emergency_callback_email(
     """Build the HTML body for an emergency human-callback notification."""
     metadata = metadata if isinstance(metadata, dict) else {}
     phone_number = metadata.get("phone_number") or "-"
-    channel = metadata.get("channel") or "-"
+    source = _format_source(metadata.get("channel"))
 
     detail_rows = "".join(
         (
@@ -242,8 +273,8 @@ def build_emergency_callback_email(
         f"<td style='padding:4px 10px;'>{session_id}</td></tr>"
         f"<tr><td style='padding:4px 10px;font-weight:bold;white-space:nowrap;'>מספר טלפון</td>"
         f"<td style='padding:4px 10px;'>{_format_value(phone_number)}</td></tr>"
-        f"<tr><td style='padding:4px 10px;font-weight:bold;white-space:nowrap;'>ערוץ</td>"
-        f"<td style='padding:4px 10px;'>{_format_value(channel)}</td></tr>"
+        f"<tr><td style='padding:4px 10px;font-weight:bold;white-space:nowrap;'>מקור השיחה</td>"
+        f"<td style='padding:4px 10px;'>{source}</td></tr>"
         "</tbody></table>",
         "<hr/>",
         "<h3>פרטי השיחה</h3>",

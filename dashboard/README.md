@@ -1,6 +1,6 @@
 # Michal Sela – Extraction Statistics Dashboard
 
-Interactive Streamlit dashboard that visualises conversation-extraction statistics from Cosmos DB.
+Interactive Streamlit dashboard that visualises conversation-extraction statistics from Postgres.
 
 ## Sections
 
@@ -18,13 +18,16 @@ Interactive Streamlit dashboard that visualises conversation-extraction statisti
 ## Prerequisites
 
 - Python 3.10+
-- A `.env` file in the project root with Cosmos DB settings:
+- A `.env` file in the project root (or Streamlit secrets) with Postgres settings:
   ```
-  COSMOSDB_CONNECTIONS_STRING=AccountEndpoint=...
-  COSMOSDB_EXT_DATABASE=your_ext_db
-  COSMOSDB_EXT_CONTAINER=your_ext_container
-  COSMOSDB_CONV_DATABASE=your_conv_db
-  COSMOSDB_CONV_CONTAINER=your_conv_container
+  POSTGRES_HOST=your-server.postgres.database.azure.com
+  POSTGRES_PORT=5432
+  POSTGRES_DB=chatbot
+  POSTGRES_USER=your_pg_user
+  POSTGRES_PASSWORD=your_password
+  POSTGRES_SSLMODE=require
+  # Set to "true" to use Azure AD auth instead of a password.
+  POSTGRES_USE_AAD=false
   ```
 
 ## Quick Start
@@ -43,7 +46,7 @@ The dashboard opens at **http://localhost:8501** by default.
 
 - **Date range** – filter extractions by timestamp
 - **Channel** – filter by WhatsApp / Bot Framework
-- **Refresh** – clears the 5-minute cache and reloads from Cosmos DB
+- **Refresh** – clears the 5-minute cache and reloads from Postgres
 
 ## Deployment
 

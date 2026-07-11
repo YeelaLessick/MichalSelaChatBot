@@ -1,8 +1,6 @@
 """
 Postgres-backed persistence for the Michal Sela chatbot.
 
-Replaces the previous Cosmos DB implementation in `cosmosdb.py`.
-
 Two tables (both in the same database):
 
     conversations(session_id PK, conversation JSONB, updated_at)
@@ -173,14 +171,11 @@ def ensure_schema() -> None:
 
 
 def connect_to_db() -> None:
-    """Initialise schema. Call once at startup.
-
-    Kept as a function for parity with the old `connect_to_cosmos()` API.
-    """
+    """Initialise schema. Call once at startup."""
     ensure_schema()
 
 
-# --- Message serialisation (kept identical to old cosmosdb.py) ---------------
+# --- Message serialisation ---------------------------------------------------
 
 
 def messages_to_json(messages):
@@ -255,8 +250,41 @@ def save_conversation(session_id: str, messages) -> None:
         logger.error("❌ Error storing conversation for %s: %s", session_id, e)
 
 
+def _extraction_has_content(extraction_data) -> bool:
+    """Whether the extraction contains any meaningful field values.
+
+    Bookkeeping/derived fields (``conversation_time``, ``conversation_ending``)
+    don't count as content, so a conversation where the model extracted nothing
+    substantive is treated as empty and not stored.
+    """
+    if not isinstance(extraction_data, dict):
+        return False
+    fields = extraction_data.get("extracted_fields")
+    if not isinstance(fields, dict):
+        return False
+
+    ignore = {"conversation_time", "conversation_ending"}
+    for key, value in fields.items():
+        if key in ignore or value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        if isinstance(value, (list, tuple, dict)) and len(value) == 0:
+            continue
+        return True
+    return False
+
+
 def save_extraction(session_id: str, extraction_data, session_metadata=None) -> None:
     """Upsert the extracted-fields document for a session."""
+    # Skip conversations where nothing meaningful was extracted.
+    if not _extraction_has_content(extraction_data):
+        logger.info(
+            "⏭️  Skipping extraction storage for session %s (nothing extracted)",
+            session_id,
+        )
+        return
+
     meta = dict(session_metadata or {})
     meta.setdefault("extraction_timestamp", datetime.now(timezone.utc).isoformat())
     meta.setdefault("original_session_id", session_id)

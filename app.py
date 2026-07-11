@@ -31,6 +31,7 @@ logging.getLogger('openai').setLevel(logging.WARNING)
 # Keep our app loggers at INFO level
 logging.getLogger('michal_sela_chatbot').setLevel(logging.INFO)
 logging.getLogger('session_manager').setLevel(logging.INFO)
+logging.getLogger('mail_service').setLevel(logging.INFO)
 
 print("Starting app")
 
