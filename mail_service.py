@@ -112,6 +112,26 @@ def _build_conversation_card(item: dict[str, Any]) -> str:
     )
 
 
+def _fields_have_content(fields: dict[str, Any] | None) -> bool:
+    """Whether extracted fields contain any meaningful value.
+
+    Bookkeeping/derived fields (``conversation_time``, ``conversation_ending``)
+    don't count, so conversations with nothing substantive are excluded.
+    """
+    if not isinstance(fields, dict):
+        return False
+    ignore = {"conversation_time", "conversation_ending"}
+    for key, value in fields.items():
+        if key in ignore or value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        if isinstance(value, (list, tuple, dict)) and len(value) == 0:
+            continue
+        return True
+    return False
+
+
 def _build_group(items: list[dict[str, Any]]) -> str:
     if not items:
         return "<p>אין שיחות בקטגוריה זו.</p>"
@@ -145,6 +165,9 @@ def fetch_conversations_for_period(
 
     for session_id, extraction, metadata, created_at in rows:
         fields = _extract_fields(extraction)
+        # Skip empty conversations — nothing meaningful was extracted.
+        if not _fields_have_content(fields):
+            continue
         created_local = created_at.astimezone(local_tz)
         results.append(
             {
