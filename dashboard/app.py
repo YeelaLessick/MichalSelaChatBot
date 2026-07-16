@@ -904,6 +904,38 @@ else:
     col_o1.info("No callback data available")
 
 # ---------------------------------------------------------------------------
+# Conversation Ending
+# ---------------------------------------------------------------------------
+st.header("📞 Conversation Ending")
+
+if "conversation_ending" in df.columns:
+    ending_counts = df["conversation_ending"].dropna().value_counts().reset_index()
+    ending_counts.columns = ["ending", "count"]
+    if not ending_counts.empty:
+        ENDING_ORDER = ["שיחה הושלמה", "נציגה תחזור", "נטישה"]
+        ending_counts["sort_key"] = ending_counts["ending"].apply(
+            lambda x: ENDING_ORDER.index(x) if x in ENDING_ORDER else 99
+        )
+        ending_counts = ending_counts.sort_values("sort_key").drop(columns="sort_key")
+        fig_ending = px.pie(
+            ending_counts,
+            values="count",
+            names="ending",
+            title="גרף סיום שיחה (Conversation Ending)",
+            color="ending",
+            color_discrete_map={
+                "שיחה הושלמה": "#2ecc71",
+                "נציגה תחזור": "#3498db",
+                "נטישה": "#e74c3c",
+            },
+        )
+        st.plotly_chart(fig_ending, width="stretch")
+    else:
+        st.info("No conversation ending data available")
+else:
+    st.info("No conversation ending data available")
+
+# ---------------------------------------------------------------------------
 # Urgency & Conversation Duration
 # ---------------------------------------------------------------------------
 st.header("⚠️ Urgency & Duration")
