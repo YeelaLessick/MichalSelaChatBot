@@ -60,7 +60,7 @@ class PostgresConfig:
 class EmailSummaryConfig:
     """Weekly email summary configuration."""
 
-    RECIPIENT = os.environ.get("WEEKLY_SUMMARY_RECIPIENT", "zoe5559@gmail.com") #"info@michalsela.org.il")
+    RECIPIENT = os.environ.get("WEEKLY_SUMMARY_RECIPIENT", "info@michalsela.org.il")
     TIMEZONE = os.environ.get("WEEKLY_SUMMARY_TIMEZONE", "Asia/Jerusalem")
     # Day of week to send on. Monday=0 ... Sunday=6. Default: Sunday.
     SEND_WEEKDAY = int(os.environ.get("WEEKLY_SUMMARY_SEND_WEEKDAY", "6"))
@@ -197,7 +197,7 @@ URGENCY_LEVEL_OPTIONS = [
 
 CONVERSATION_ENDING_OPTIONS = [
     "נטישה",
-    "נציגה תחזור",
+    "בקשת נציגה אנושית",
     "שיחה הושלמה",
 ]
 

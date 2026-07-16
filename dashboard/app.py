@@ -743,34 +743,6 @@ if "extraction_timestamp" in df.columns and df["extraction_timestamp"].notna().a
     st.plotly_chart(fig_time, width="stretch")
 
 # ---------------------------------------------------------------------------
-# Channel distribution
-# ---------------------------------------------------------------------------
-st.subheader("📡 Channel Distribution")
-col_ch1, col_ch2 = st.columns(2)
-
-channel_counts = df["channel"].value_counts().reset_index()
-channel_counts.columns = ["channel", "count"]
-fig_channel = px.pie(
-    channel_counts,
-    values="count",
-    names="channel",
-    color_discrete_sequence=px.colors.qualitative.Set2,
-)
-col_ch1.plotly_chart(fig_channel, width="stretch")
-
-# Channel vs average message count
-channel_msg = df.groupby("channel")["message_count"].mean().reset_index()
-channel_msg.columns = ["channel", "avg_messages"]
-fig_ch_msg = px.bar(
-    channel_msg,
-    x="channel",
-    y="avg_messages",
-    labels={"channel": "Channel", "avg_messages": "Avg Messages"},
-    color_discrete_sequence=["#2ecc71"],
-)
-col_ch2.plotly_chart(fig_ch_msg, width="stretch")
-
-# ---------------------------------------------------------------------------
 # Demographics
 # ---------------------------------------------------------------------------
 st.header("👤 Demographics")
@@ -912,7 +884,7 @@ if "conversation_ending" in df.columns:
     ending_counts = df["conversation_ending"].dropna().value_counts().reset_index()
     ending_counts.columns = ["ending", "count"]
     if not ending_counts.empty:
-        ENDING_ORDER = ["שיחה הושלמה", "נציגה תחזור", "נטישה"]
+        ENDING_ORDER = ["שיחה הושלמה", "בקשת נציגה אנושית", "נטישה"]
         ending_counts["sort_key"] = ending_counts["ending"].apply(
             lambda x: ENDING_ORDER.index(x) if x in ENDING_ORDER else 99
         )
@@ -925,7 +897,7 @@ if "conversation_ending" in df.columns:
             color="ending",
             color_discrete_map={
                 "שיחה הושלמה": "#2ecc71",
-                "נציגה תחזור": "#3498db",
+                "בקשת נציגה אנושית": "#3498db",
                 "נטישה": "#e74c3c",
             },
         )
