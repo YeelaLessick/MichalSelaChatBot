@@ -197,7 +197,7 @@ URGENCY_LEVEL_OPTIONS = [
 
 CONVERSATION_ENDING_OPTIONS = [
     "נטישה",
-    "בקשת נציגה אנושית",
+    "נציגה תחזור",
     "שיחה הושלמה",
 ]
 

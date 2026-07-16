@@ -62,7 +62,7 @@ def infer_conversation_ending(messages: List[BaseMessage]) -> str:
             continue
         content = str(getattr(msg, "content", "") or "").lower()
         if any(marker in content for marker in callback_markers):
-            return "בקשת נציגה אנושית"
+            return "נציגה תחזור"
 
     closing_markers = {
         "תודה", "תודה רבה", "להתראות", "סיום", "נגמר", "סיימנו", "bye", "goodbye", "thanks",
@@ -117,10 +117,10 @@ async def infer_conversation_ending_with_agent(
             """את מסווגת את אופן סיום השיחה. החזירי ערך אחד בלבד מתוך:
 - נטישה
 - שיחה הושלמה
-- בקשת נציגה אנושית
+- נציגה תחזור
 
 הגדרות מחייבות:
-1) בקשת נציגה אנושית:
+1) נציגה תחזור:
 - אם הפונה ביקשה במפורש שיחזרו אליה נציג/ה אנושי/ת.
 - כולל ניסוחים כמו "תחזרו אליי", "שנציג יחזור", "אפשר לדבר עם נציגה".
 
@@ -136,11 +136,11 @@ async def infer_conversation_ending_with_agent(
 
 כללי הכרעה:
 - השתמשי בכל ההודעות שסופקו לך (כל השיחה), ותני משקל מיוחד לשלבי הסיום.
-- סדר עדיפויות במקרה של סימנים מעורבים: בקשת נציגה אנושית > שיחה הושלמה > נטישה.
+- סדר עדיפויות במקרה של סימנים מעורבים: נציגה תחזור > שיחה הושלמה > נטישה.
 - אם אין ודאות מספקת לקבוע בביטחון, החזירי decidable=false.
 
 החזירי JSON בלבד בפורמט:
-{"decidable": true/false, "conversation_ending": "נטישה|שיחה הושלמה|בקשת נציגה אנושית|null"}
+{"decidable": true/false, "conversation_ending": "נטישה|שיחה הושלמה|נציגה תחזור|null"}
 """,
         ),
         ("human", "הודעות אחרונות:\n{conversation}"),

@@ -881,7 +881,12 @@ else:
 st.header("📞 Conversation Ending")
 
 if "conversation_ending" in df.columns:
-    ending_counts = df["conversation_ending"].dropna().value_counts().reset_index()
+    # Display-only relabeling; underlying stored value stays "נציגה תחזור".
+    ENDING_DISPLAY_LABELS = {"נציגה תחזור": "בקשת נציגה אנושית"}
+    ending_series = df["conversation_ending"].dropna().apply(
+        lambda x: ENDING_DISPLAY_LABELS.get(x, x)
+    )
+    ending_counts = ending_series.value_counts().reset_index()
     ending_counts.columns = ["ending", "count"]
     if not ending_counts.empty:
         ENDING_ORDER = ["שיחה הושלמה", "בקשת נציגה אנושית", "נטישה"]

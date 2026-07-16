@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 # Order in which conversation-ending groups appear in the report.
 CONVERSATION_ENDING_ORDER = [
-    "בקשת נציגה אנושית",
+    "נציגה תחזור",
     "נטישה",
     "שיחה הושלמה",
 ]
